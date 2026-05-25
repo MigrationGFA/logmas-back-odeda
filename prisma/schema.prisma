@@ -1,0 +1,116 @@
+datasource db {
+  provider = "postgresql"
+  // url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  super_admin
+  lga_admin
+  chairman
+  treasurer
+  auditor
+  contractor
+  field_officer
+  citizen
+}
+
+enum ComplaintStatus {
+  open
+  assigned
+  in_progress
+  resolved
+  closed
+}
+
+enum PermitStatus {
+  draft
+  pending
+  issued
+  expired
+}
+
+model User {
+  id                 String       @id @default(uuid())
+  email              String       @unique
+  password           String
+  firstName          String
+  lastName           String
+  role               Role         @default(citizen)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  deletedAt          DateTime?
+  
+  assignedComplaints Complaint[]  @relation("AssignedOfficer")
+  permits            Permit[]
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+model Ward {
+  id              String      @id @default(uuid())
+  name            String      @unique
+  code            String      @unique
+  councillor      String
+  councillorPhone String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+  
+  complaints      Complaint[]
+
+  @@map("wards")
+}
+
+model Complaint {
+  id           String          @id @default(uuid())
+  title        String
+  description  String
+  customerName String
+  phone        String
+  status       ComplaintStatus @default(open)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  
+  wardId       String
+  ward         Ward            @relation(fields: [wardId], references: [id])
+  
+  assignedToId String?
+  assignedTo   User?           @relation("AssignedOfficer", fields: [assignedToId], references: [id])
+
+  @@map("complaints")
+}
+
+model Permit {
+  id               String       @id @default(uuid())
+  permitNumber     String       @unique
+  verificationCode String       @unique
+  qrTokenToken     String       @unique
+  status           PermitStatus @default(draft)
+  title            String
+  description      String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  
+  userId           String
+  user             User         @relation(fields: [userId], references: [id])
+
+  @@map("permits")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  details   String
+  ipAddress String?
+  createdAt DateTime @default(now())
+  
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}

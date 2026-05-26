@@ -5,6 +5,7 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 enum Role {
@@ -15,6 +16,9 @@ enum Role {
   auditor
   contractor
   field_officer
+  ward_councillor
+  agent //contractor agent
+  business_owner
   citizen
 }
 

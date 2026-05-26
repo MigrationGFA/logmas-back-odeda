@@ -5,13 +5,13 @@ import morgan from 'morgan';
 import swaggerUi from 'swagger-ui-express';
 
 import authRoutes from './modules/auth/auth.routes';
-import userRoutes from './modules/users/users.routes';
-import wardRoutes from './modules/wards/ward.routes';
+import userRoutes from './modules/user/users.routes';
+import wardRoutes from './modules/ward/wards.routes';
 import complaintRoutes from './modules/complaints/complaints.routes';
 import permitRoutes from './modules/permits/permits.routes';
-
 import { errorHandler } from './middleware/error.middleware';
-const swaggerDocument = require('./config/swagger');
+import { swaggerDocument } from './config/swagger';
+
 
 const app = express();
 
@@ -20,12 +20,24 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 
+// Base Health-Check Endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: "healthy",
+    system: "LOGMAS API Engine",
+    version: "1.0.0-phase1",
+    timestamp: new Date().toISOString()
+  });
+});
+
+
 // API Engine Base Routing Architecture
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/wards', wardRoutes);
 app.use('/api/v1/complaints', complaintRoutes);
 app.use('/api/v1/permits', permitRoutes);
+
 
 // Shared Interactive Engine Schema Verification Explorer Links UI Routes
 app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));

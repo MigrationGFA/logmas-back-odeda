@@ -8,9 +8,10 @@ import authRoutes from './modules/auth/auth.routes';
 import userRoutes from './modules/user/users.routes';
 import wardRoutes from './modules/ward/wards.routes';
 import complaintRoutes from './modules/complaints/complaints.routes';
-import businessRoutes from './modules/business/business.routes';
+import fieldOperationsRoutes from './modules/operations/field.routes';
 import stateOfOriginRoutes from './modules/stateOfOrigin/stateOfOrigin.routes';
-
+import businessRoutes from './modules/business/business.routes';
+import uploadRoutes from './modules/uploads/upload.routes';
 import permitRoutes from './modules/permits/permits.routes';
 import { errorHandler } from './middleware/error.middleware';
 import { swaggerDocument } from './config/swagger';
@@ -33,6 +34,7 @@ app.get('/', (req, res) => {
   });
 });
 
+app.use('/public', express.static('public'));
 
 // API Engine Base Routing Architecture
 app.use('/api/v1/auth', authRoutes);
@@ -42,6 +44,8 @@ app.use('/api/v1/complaints', complaintRoutes);
 app.use('/api/v1/permits', permitRoutes);
 app.use('/api/v1/state-of-origin', stateOfOriginRoutes);
 app.use('/api/v1/business', businessRoutes);
+app.use('/api/v1/operations/field', fieldOperationsRoutes);
+app.use('/api/v1/uploads', uploadRoutes);
 
 
 // Shared Interactive Engine Schema Verification Explorer Links UI Routes

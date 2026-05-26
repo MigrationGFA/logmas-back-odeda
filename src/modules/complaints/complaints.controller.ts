@@ -109,7 +109,8 @@ export const getMyComplaints = async (req: Request, res: Response, next: NextFun
  */
 export const getMyComplaintById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+    let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
     const userId = req.user!.id;
 
     const complaint = await prisma.complaint.findFirst({
@@ -185,7 +186,8 @@ export const getWardComplaints = async (req: Request, res: Response, next: NextF
  */
 export const wardCouncillorRespond = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+    let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
     const councillorId = req.user!.id;
     const { message } = req.body;
 
@@ -268,7 +270,8 @@ export const getAllComplaints = async (req: Request, res: Response, next: NextFu
  */
 export const getComplaintById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+     let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
 
     const complaint = await prisma.complaint.findUnique({
       where: { id },
@@ -292,7 +295,8 @@ export const getComplaintById = async (req: Request, res: Response, next: NextFu
  */
 export const assignComplaint = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+     let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
     const adminId = req.user!.id;
     const { assignedToId } = req.body;
 
@@ -352,7 +356,8 @@ export const assignComplaint = async (req: Request, res: Response, next: NextFun
  */
 export const updateComplaintStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+     let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
     const adminId = req.user!.id;
     const { status, resolutionNote } = req.body;
 
@@ -395,7 +400,8 @@ export const updateComplaintStatus = async (req: Request, res: Response, next: N
  */
 export const adminRespond = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+     let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
     const adminId = req.user!.id;
     const { message } = req.body;
 

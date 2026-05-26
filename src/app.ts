@@ -8,6 +8,7 @@ import authRoutes from './modules/auth/auth.routes';
 import userRoutes from './modules/user/users.routes';
 import wardRoutes from './modules/ward/wards.routes';
 import complaintRoutes from './modules/complaints/complaints.routes';
+import stateOfOriginRoutes from './modules/stateOfOrigin/stateOfOrigin.routes';
 import permitRoutes from './modules/permits/permits.routes';
 import { errorHandler } from './middleware/error.middleware';
 import { swaggerDocument } from './config/swagger';
@@ -37,6 +38,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/wards', wardRoutes);
 app.use('/api/v1/complaints', complaintRoutes);
 app.use('/api/v1/permits', permitRoutes);
+app.use('/api/v1/state-of-origin', stateOfOriginRoutes);
 
 
 // Shared Interactive Engine Schema Verification Explorer Links UI Routes

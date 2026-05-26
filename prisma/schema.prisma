@@ -4,9 +4,13 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
 }
+
+// ============================================================
+// ENUMS
+// ============================================================
 
 enum Role {
   super_admin
@@ -14,12 +18,33 @@ enum Role {
   chairman
   treasurer
   auditor
-  contractor
-  field_officer
   ward_councillor
-  agent //contractor agent
+  contractor
+  agent           // sub-agent under a contractor
+  field_officer
   business_owner
   citizen
+}
+
+enum ApplicationStatus {
+  draft
+  submitted
+  payment_pending
+  paid
+  under_review
+  forwarded_to_councillor
+  approved
+  rejected
+  certificate_issued
+}
+
+enum PermitStatus {
+  draft
+  pending_payment
+  paid
+  issued
+  expired
+  revoked
 }
 
 enum ComplaintStatus {
@@ -30,91 +55,497 @@ enum ComplaintStatus {
   closed
 }
 
-enum PermitStatus {
+enum InvoiceStatus {
   draft
-  pending
-  issued
-  expired
+  sent
+  paid
+  overdue
+  cancelled
+  partially_paid
 }
 
+enum PaymentMethod {
+  online_gateway
+  bank_transfer
+  virtual_account
+  pos
+  cash
+}
+
+enum PaymentStatus {
+  pending
+  confirmed
+  failed
+  reversed
+}
+
+enum RevenueCategory {
+  trade_permit
+  market_levy
+  environmental_levy
+  signage
+  parking_levy
+  haulage_levy
+  lockup_store_levy
+  business_levy
+  event_permit
+  state_of_origin_fee
+  other
+}
+
+enum BillingCycle {
+  one_time
+  daily
+  weekly
+  monthly
+  yearly
+}
+
+enum NotificationChannel {
+  sms
+  email
+  whatsapp
+  in_app
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  failed
+}
+
+enum AuditAction {
+  login
+  logout
+  login_failed
+  invoice_created
+  invoice_edited
+  payment_confirmed
+  payment_reversed
+  receipt_generated
+  receipt_verified
+  permit_issued
+  permit_revoked
+  application_submitted
+  application_approved
+  application_rejected
+  certificate_issued
+  user_created
+  user_updated
+  user_deleted
+  pricing_updated
+  complaint_raised
+  complaint_assigned
+  complaint_resolved
+}
+
+// ============================================================
+// USERS & IDENTITY
+// ============================================================
+
 model User {
-  id                 String       @id @default(uuid())
-  email              String       @unique
-  password           String
-  firstName          String
-  lastName           String
-  role               Role         @default(citizen)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-  deletedAt          DateTime?
-  
-  assignedComplaints Complaint[]  @relation("AssignedOfficer")
-  permits            Permit[]
-  auditLogs          AuditLog[]
+  id          String    @id @default(uuid())
+  email       String    @unique
+  phone       String?   @unique
+  password    String
+  firstName   String
+  lastName    String
+  role        Role      @default(citizen)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // Profile
+  avatarUrl   String?
+  address     String?
+  nin         String?   // National Identification Number
+
+  // Ward councillor is tied to a ward
+  wardId      String?
+  ward        Ward?     @relation("WardCouncillor", fields: [wardId], references: [id])
+
+  // Contractor hierarchy
+  contractorId String?
+  contractor   User?    @relation("ContractorAgents", fields: [contractorId], references: [id])
+  agents       User[]   @relation("ContractorAgents")
+
+  // Field officer is assigned to a contractor
+  supervisorId String?
+  supervisor   User?    @relation("SupervisorOfficers", fields: [supervisorId], references: [id])
+  fieldOfficers User[] @relation("SupervisorOfficers")
+
+  // Relations
+  stateOfOriginApplications StateOfOriginApplication[]
+  businesses                Business[]
+  invoicesCreated           Invoice[]                  @relation("InvoiceCreatedBy")
+  invoicesAssignedTo        Invoice[]                  @relation("InvoiceAssignedOfficer")
+  payments                  Payment[]
+  receiptsIssued            Receipt[]
+  permitsIssued             Permit[]                   @relation("PermitIssuedBy")
+  complaintsRaised          Complaint[]                @relation("ComplaintRaisedBy")
+  complaintsAssigned        Complaint[]                @relation("ComplaintAssignedTo")
+  notifications             Notification[]
+  auditLogs                 AuditLog[]
+  levyConfigs               LevyConfig[]
 
   @@map("users")
 }
 
+// ============================================================
+// GEOGRAPHY
+// ============================================================
+
 model Ward {
-  id              String      @id @default(uuid())
-  name            String      @unique
-  code            String      @unique
-  councillor      String
-  councillorPhone String
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  deletedAt       DateTime?
-  
-  complaints      Complaint[]
+  id          String    @id @default(uuid())
+  name        String    @unique
+  code        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // The councillor assigned to this ward
+  councillors User[]    @relation("WardCouncillor")
+
+  complaints                Complaint[]
+  stateOfOriginApplications StateOfOriginApplication[]
+  businesses                Business[]
 
   @@map("wards")
 }
 
-model Complaint {
-  id           String          @id @default(uuid())
-  title        String
-  description  String
-  customerName String
-  phone        String
-  status       ComplaintStatus @default(open)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  
-  wardId       String
-  ward         Ward            @relation(fields: [wardId], references: [id])
-  
-  assignedToId String?
-  assignedTo   User?           @relation("AssignedOfficer", fields: [assignedToId], references: [id])
+// ============================================================
+// STATE OF ORIGIN
+// ============================================================
 
-  @@map("complaints")
+model StateOfOriginApplication {
+  id               String            @id @default(uuid())
+  applicationNo    String            @unique @default(cuid())
+  status           ApplicationStatus @default(draft)
+
+  // Applicant details
+  fullName         String
+  dateOfBirth      DateTime
+  gender           String
+  address          String
+  phone            String
+  email            String?
+  passportUrl      String?
+  nin              String?
+
+  // Reason / purpose
+  purpose          String?
+
+  // Relationships
+  applicantId      String
+  applicant        User              @relation(fields: [applicantId], references: [id])
+
+  wardId           String
+  ward             Ward              @relation(fields: [wardId], references: [id])
+
+  // Review trail
+  reviewedByAdminId   String?
+  reviewedByAdminAt   DateTime?
+  reviewNotes         String?
+
+  approvedByCouncillorId String?
+  approvedByCouncillorAt DateTime?
+  councillorNotes        String?
+
+  rejectionReason        String?
+
+  // Certificate (generated on approval)
+  certificate      Certificate?
+
+  // Payment
+  invoiceId        String?           @unique
+  invoice          Invoice?          @relation(fields: [invoiceId], references: [id])
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("state_of_origin_applications")
+}
+
+model Certificate {
+  id                 String   @id @default(uuid())
+  certificateNumber  String   @unique
+  verificationCode   String   @unique
+  qrToken            String   @unique
+  issuedAt           DateTime @default(now())
+  expiresAt          DateTime?
+  pdfUrl             String?
+
+  applicationId      String   @unique
+  application        StateOfOriginApplication @relation(fields: [applicationId], references: [id])
+
+  @@map("certificates")
+}
+
+// ============================================================
+// BUSINESSES & TRADE PERMITS
+// ============================================================
+
+model Business {
+  id           String    @id @default(uuid())
+  businessName String
+  ownerName    String
+  address      String
+  phone        String
+  email        String?
+  cacNumber    String?
+  category     String
+  description  String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  // Who owns/registered this business
+  ownerId      String
+  owner        User      @relation(fields: [ownerId], references: [id])
+
+  wardId       String
+  ward         Ward      @relation(fields: [wardId], references: [id])
+
+  permits      Permit[]
+  invoices     Invoice[]
+
+  @@map("businesses")
 }
 
 model Permit {
   id               String       @id @default(uuid())
   permitNumber     String       @unique
   verificationCode String       @unique
-  qrTokenToken     String       @unique
+  qrToken          String       @unique
   status           PermitStatus @default(draft)
-  title            String
-  description      String
+  permitType       String       // e.g. "Annual Trade Permit", "Event Permit"
+  category         RevenueCategory
+  validFrom        DateTime?
+  validTo          DateTime?
+  pdfUrl           String?
+
+  businessId       String
+  business         Business     @relation(fields: [businessId], references: [id])
+
+  issuedById       String?
+  issuedBy         User?        @relation("PermitIssuedBy", fields: [issuedById], references: [id])
+
+  invoiceId        String?      @unique
+  invoice          Invoice?     @relation(fields: [invoiceId], references: [id])
+
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
-  
-  userId           String
-  user             User         @relation(fields: [userId], references: [id])
 
   @@map("permits")
 }
 
+// ============================================================
+// REVENUE CONFIG (Treasurer manages this)
+// ============================================================
+
+model LevyConfig {
+  id           String          @id @default(uuid())
+  name         String
+  category     RevenueCategory
+  description  String?
+  amount       Decimal         @db.Decimal(12, 2)
+  billingCycle BillingCycle    @default(one_time)
+  penaltyRate  Decimal?        @db.Decimal(5, 2) // percentage
+  isActive     Boolean         @default(true)
+  effectiveFrom DateTime       @default(now())
+  effectiveTo   DateTime?
+
+  configuredById String
+  configuredBy   User          @relation(fields: [configuredById], references: [id])
+
+  invoices       Invoice[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@map("levy_configs")
+}
+
+// ============================================================
+// INVOICES, PAYMENTS & RECEIPTS
+// ============================================================
+
+model Invoice {
+  id             String        @id @default(uuid())
+  invoiceNumber  String        @unique @default(cuid())
+  status         InvoiceStatus @default(draft)
+  category       RevenueCategory
+  description    String?
+
+  subtotal       Decimal       @db.Decimal(12, 2)
+  penaltyAmount  Decimal       @db.Decimal(12, 2) @default(0)
+  totalAmount    Decimal       @db.Decimal(12, 2)
+  amountPaid     Decimal       @db.Decimal(12, 2) @default(0)
+  balanceDue     Decimal       @db.Decimal(12, 2)
+
+  dueDate        DateTime?
+  paidAt         DateTime?
+
+  // What levy config was used
+  levyConfigId   String?
+  levyConfig     LevyConfig?   @relation(fields: [levyConfigId], references: [id])
+
+  // Who created this invoice (field officer or system)
+  createdById    String
+  createdBy      User          @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+
+  // Which field officer is responsible (if applicable)
+  assignedOfficerId String?
+  assignedOfficer   User?     @relation("InvoiceAssignedOfficer", fields: [assignedOfficerId], references: [id])
+
+  // For business invoices
+  businessId     String?
+  business       Business?     @relation(fields: [businessId], references: [id])
+
+  // Virtual account for this invoice
+  virtualAccountNo   String?
+  virtualAccountBank String?
+  virtualAccountRef  String?   @unique
+
+  payments       Payment[]
+  receipt        Receipt?
+  permit         Permit?
+  stateOfOriginApplication StateOfOriginApplication?
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@map("invoices")
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  amount          Decimal       @db.Decimal(12, 2)
+  method          PaymentMethod
+  status          PaymentStatus @default(pending)
+  reference       String        @unique // gateway or manual ref
+  gatewayRef      String?       // payment gateway transaction ID
+  narration       String?
+
+  confirmedAt     DateTime?
+  confirmedById   String?       // officer who confirmed cash/POS
+
+  invoiceId       String
+  invoice         Invoice       @relation(fields: [invoiceId], references: [id])
+
+  paidById        String?
+  paidBy          User?         @relation(fields: [paidById], references: [id])
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("payments")
+}
+
+model Receipt {
+  id               String    @id @default(uuid())
+  receiptNumber    String    @unique
+  verificationCode String    @unique
+  qrToken          String    @unique
+  amountPaid       Decimal   @db.Decimal(12, 2)
+  pdfUrl           String?
+  issuedAt         DateTime  @default(now())
+
+  invoiceId        String    @unique
+  invoice          Invoice   @relation(fields: [invoiceId], references: [id])
+
+  issuedById       String
+  issuedBy         User      @relation(fields: [issuedById], references: [id])
+
+  @@map("receipts")
+}
+
+// ============================================================
+// COMPLAINTS
+// ============================================================
+
+model Complaint {
+  id           String          @id @default(uuid())
+  ticketNumber String          @unique @default(cuid())
+  title        String
+  description  String
+  status       ComplaintStatus @default(open)
+
+  // Can be raised by citizen or business owner
+  raisedById   String
+  raisedBy     User            @relation("ComplaintRaisedBy", fields: [raisedById], references: [id])
+
+  wardId       String
+  ward         Ward            @relation(fields: [wardId], references: [id])
+
+  assignedToId String?
+  assignedTo   User?           @relation("ComplaintAssignedTo", fields: [assignedToId], references: [id])
+
+  assignedAt   DateTime?
+  resolvedAt   DateTime?
+  resolutionNote String?
+
+  responses    ComplaintResponse[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@map("complaints")
+}
+
+model ComplaintResponse {
+  id          String    @id @default(uuid())
+  message     String
+  responderId String
+  createdAt   DateTime  @default(now())
+
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id])
+
+  @@map("complaint_responses")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id        String              @id @default(uuid())
+  channel   NotificationChannel
+  status    NotificationStatus  @default(pending)
+  subject   String?
+  message   String
+  sentAt    DateTime?
+  failReason String?
+
+  userId    String
+  user      User                @relation(fields: [userId], references: [id])
+
+  createdAt DateTime            @default(now())
+
+  @@map("notifications")
+}
+
+// ============================================================
+// AUDIT LOGS
+// ============================================================
+
 model AuditLog {
-  id        String   @id @default(uuid())
-  action    String
-  details   String
-  ipAddress String?
-  createdAt DateTime @default(now())
-  
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id])
+  id         String      @id @default(uuid())
+  action     AuditAction
+  entity     String?     // e.g. "Invoice", "Permit", "User"
+  entityId   String?     // ID of the affected record
+  details    Json?       // before/after snapshot or extra context
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime    @default(now())
+
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
 }

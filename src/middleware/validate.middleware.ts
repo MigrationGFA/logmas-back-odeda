@@ -12,3 +12,11 @@ export const validateBody = (schema: ZodSchema) => {
     next();
   };
 };
+
+export const validateQuery = (schema: ZodSchema) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) return sendError(res, 'Invalid query parameters', 'VALIDATION_ERROR', result.error.format(), 400);
+    req.query = result.data;
+    next();
+  };

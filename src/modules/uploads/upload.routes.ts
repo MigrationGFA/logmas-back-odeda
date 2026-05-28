@@ -1,16 +1,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import multer from 'multer';
+import multer, { Multer } from 'multer';
 import path from 'path';
 import crypto from 'crypto';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { sendSuccess, sendError } from '../../utils/response';
 import { UPLOAD_FOLDER_MAP, ensureDirectoryExists } from '../../utils/fileStorage';
 
+// Extend Express Request type to include file from multer
+interface MulterRequest extends Request {
+  file: Express.Multer.File;
+}
+
 const router = Router();
 
 // Configure custom Multer storage engine
 const diskStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
     // Read the type parameter from the request query string (e.g., ?type=passports)
     const uploadType = (req.query.type as string) || 'documents';
     const targetFolder = UPLOAD_FOLDER_MAP[uploadType] || UPLOAD_FOLDER_MAP.documents;
@@ -20,7 +25,7 @@ const diskStorage = multer.diskStorage({
     
     cb(null, targetFolder);
   },
-  filename: (req, file, cb) => {
+  filename: (req: Express.Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
     // Generate a secure unique name: timestamp + random bytes + original extension
     const uniqueSuffix = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const fileExtension = path.extname(file.originalname);
@@ -32,7 +37,7 @@ const diskStorage = multer.diskStorage({
 const upload = multer({
   storage: diskStorage,
   limits: { fileSize: 5 * 1024 * 1024 }, // Max file size: 5MB
-  fileFilter: (req, file, cb) => {
+  fileFilter: (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf'];
     if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
@@ -59,7 +64,10 @@ router.post('/', requireAuth, (req: Request, res: Response, next: NextFunction) 
       return next(err);
     }
 
-    if (!req.file) {
+    // Type assertion since multer adds the file property
+    const multerReq = req as MulterRequest;
+    
+    if (!multerReq.file) {
       return sendError(res, 'No file asset found in payload.', 'BAD_REQUEST', null, 400);
     }
 
@@ -68,15 +76,15 @@ router.post('/', requireAuth, (req: Request, res: Response, next: NextFunction) 
     const serverUrl = `${req.protocol}://${req.get('host')}`;
     
     // Normalize path separators to forward slashes for URLs regardless of operating system
-    const normalizedRelativePath = req.file.path.replace(/\\/g, '/');
+    const normalizedRelativePath = multerReq.file.path.replace(/\\/g, '/');
     const publicUrl = `${serverUrl}/${normalizedRelativePath}`;
 
     return sendSuccess(
       res, 
       { 
         url: publicUrl,
-        filename: req.file.filename,
-        size: req.file.size
+        filename: multerReq.file.filename,
+        size: multerReq.file.size
       }, 
       'Asset saved and indexed successfully onto local instance storage.'
     );

@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
-    "start": "node src/server.js",
+    "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "prisma:migrate": "npx prisma migrate dev",
     "prisma:deploy": "npx prisma migrate deploy",

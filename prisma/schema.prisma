@@ -290,11 +290,11 @@ model Certificate {
 
 model Business {
   id           String    @id @default(uuid())
-  businessName String
+  businessName String   @unique
   ownerName    String
   address      String
   phone        String
-  email        String?
+  email        String?  @unique
   cacNumber    String?
   category     String
   description  String?

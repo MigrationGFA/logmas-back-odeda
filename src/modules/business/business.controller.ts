@@ -473,13 +473,29 @@ export const getMyInvoiceById = async (req: Request, res: Response, next: NextFu
  * GET /api/v1/business/permits/verify/:code
  * Anyone can verify a permit via verification code or QR token.
  */
+/**
+ * GET /api/v1/permits/verify/:code
+ * Anyone can verify a permit via verification code or QR token.
+ */
 export const verifyPermit = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { code } = req.params;
+    // FIX #1: Ensure code is a string (Express params can be string[])
+    const code = Array.isArray(req.params.code) 
+      ? req.params.code[0] 
+      : req.params.code;
 
+    if (!code) {
+      return sendError(res, 'Verification code is required', 'BAD_REQUEST', null, 400);
+    }
+
+    // FIX #2: Use explicit typing for Prisma query with include
     const permit = await prisma.permit.findFirst({
       where: {
-        OR: [{ verificationCode: code }, { qrToken: code }],
+        OR: [
+          { verificationCode: code },
+          { qrToken: code }
+        ],
+        // deletedAt: null, // Soft delete filter
       },
       include: {
         business: {
@@ -488,7 +504,9 @@ export const verifyPermit = async (req: Request, res: Response, next: NextFuncti
             ownerName: true,
             address: true,
             category: true,
-            ward: { select: { name: true } },
+            ward: { 
+              select: { name: true } 
+            },
           },
         },
       },
@@ -498,16 +516,21 @@ export const verifyPermit = async (req: Request, res: Response, next: NextFuncti
       return sendError(res, 'Permit not found or invalid verification code', 'NOT_FOUND', null, 404);
     }
 
+    // Safety check: business relation might be null if not loaded
+    if (!permit.business) {
+      return sendError(res, 'Permit data incomplete', 'INTERNAL_ERROR', null, 500);
+    }
+
     const now = new Date();
     const isExpired = permit.validTo ? permit.validTo < now : false;
-    const isValid   = permit.status === 'issued' && !isExpired;
+    const isValid = permit.status === 'issued' && !isExpired;
 
     return sendSuccess(res, {
       valid: isValid,
       status: permit.status,
       isExpired,
       permitNumber: permit.permitNumber,
-      permitType: permit.permitType,
+      permitType: permit.permitType, // Ensure this field exists in schema
       category: permit.category,
       validFrom: permit.validFrom,
       validTo: permit.validTo,
@@ -517,11 +540,14 @@ export const verifyPermit = async (req: Request, res: Response, next: NextFuncti
         owner: permit.business.ownerName,
         address: permit.business.address,
         category: permit.business.category,
-        ward: permit.business.ward.name,
+        ward: permit.business.ward?.name || 'Unknown',
       },
       issuingAuthority: 'Ijebu North East Local Government',
     });
-  } catch (err) { next(err); }
+
+  } catch (err) {
+    next(err);
+  }
 };
 
 // ─────────────────────────────────────────────────────────────

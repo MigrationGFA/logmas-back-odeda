@@ -457,7 +457,10 @@ export const issuePermit = async (req: Request, res: Response, next: NextFunctio
  */
 export const verifyReceipt = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { code } = req.params;
+    // const { code } = req.params;
+     const code = Array.isArray(req.params.code) 
+      ? req.params.code[0] 
+      : req.params.code;
     const officerId = req.user!.id;
 
     const receipt = await prisma.receipt.findFirst({

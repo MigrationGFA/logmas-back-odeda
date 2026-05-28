@@ -19,14 +19,14 @@ export const getWards = async (req: Request, res: Response, next: NextFunction) 
 
 export const updateWard = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const response = await prisma.ward.update({ where: { id: req.params.id }, data: req.body });
+    const response = await prisma.ward.update({ where: { id:String(req.params.id) }, data: req.body });
     return sendSuccess(res, response);
   } catch (err) { next(err); }
 };
 
 export const softDeleteWard = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await prisma.ward.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
+    await prisma.ward.update({ where: { id:String(req.params.id) }, data: { deletedAt: new Date() } });
     return sendSuccess(res, { message: 'Ward systemic perimeter entity soft dropped.' });
   } catch (err) { next(err); }
 };

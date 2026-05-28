@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../utils/jwt';
 import { sendError } from '../utils/response';
+import { Role } from '@prisma/client';
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -12,7 +13,10 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
     
-    req.user = decoded;
+    req.user = {
+      ...decoded,
+      role: decoded.role as Role
+    };
     next();
   } catch (error) {
     return sendError(res, 'Invalid or expired access token', 'UNAUTHORIZED', null, 401);

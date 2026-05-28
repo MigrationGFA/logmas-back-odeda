@@ -426,7 +426,10 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
  */
 export const verifyCertificate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { code } = req.params;
+    // const { code } = req.params;
+     const code = Array.isArray(req.params.code) 
+      ? req.params.code[0] 
+      : req.params.code;
 
     const certificate = await prisma.certificate.findFirst({
       where: {

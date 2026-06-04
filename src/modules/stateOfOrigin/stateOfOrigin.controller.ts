@@ -22,22 +22,22 @@ export const submitApplication = async (req: Request, res: Response, next: NextF
     } = req.body;
 
     // Prevent duplicate pending applications
-    const existing = await prisma.stateOfOriginApplication.findFirst({
-      where: {
-        applicantId: citizenId,
-        status: { notIn: ['rejected', 'certificate_issued'] },
-        // deletedAt: null,
-      },
-    });
-    if (existing) {
-      return sendError(
-        res,
-        'You already have an active State of Origin application',
-        'CONFLICT',
-        null,
-        409
-      );
-    }
+    // const existing = await prisma.stateOfOriginApplication.findFirst({
+    //   where: {
+    //     applicantId: citizenId,
+    //     status: { notIn: ['rejected', 'certificate_issued'] },
+    //     // deletedAt: null,
+    //   },
+    // });
+    // if (existing) {
+    //   return sendError(
+    //     res,
+    //     'You already have an active State of Origin application',
+    //     'CONFLICT',
+    //     null,
+    //     409
+    //   );
+    // }
 
     // Verify ward exists
     const ward = await prisma.ward.findUnique({ where: { id: wardId } });

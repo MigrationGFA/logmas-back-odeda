@@ -102,7 +102,14 @@ export const login = async (
     });
     const refreshToken = generateRefreshToken({ id: user.id });
 
-    return sendSuccess(res, { accessToken, refreshToken, role: user.role });
+    return sendSuccess(res, { accessToken, refreshToken, user: {               // ← THIS was missing
+        id:        user.id,
+        email:     user.email,
+        firstName: user.firstName,
+        lastName:  user.lastName,
+        role:      user.role,
+        isActive:  user.isActive,
+      }, });
   } catch (err) {
     next(err);
   }

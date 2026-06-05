@@ -85,6 +85,8 @@ export const login = async (
     const user = await prisma.user.findFirst({
       where: { email, deletedAt: null },
     });
+
+    console.log(user,"⛔")
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return sendError(
         res,

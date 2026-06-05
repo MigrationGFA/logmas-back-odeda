@@ -238,26 +238,57 @@ export const getMyPermits = async (req: Request, res: Response, next: NextFuncti
   try {
     const ownerId = req.user!.id;
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId, isActive: true },
-      select: { id: true },
+    // 1. Fetch all active businesses owned by this user
+    const businesses = await prisma.business.findMany({
+      where: { ownerId, deletedAt: null },
+      select: { id: true, businessName: true }
     });
-    if (!business) return sendError(res, 'No active business found', 'NOT_FOUND', null, 404);
 
+    if (!businesses.length) {
+      return sendSuccess(res, []); // Return empty array so UI handles <EmptyState> cleanly
+    }
+
+    const businessIds = businesses.map(b => b.id);
+    // Create a fast lookup map for business names
+    const businessNameMap = new Map(businesses.map(b => [b.id, b.businessName]));
+
+    // 2. Fetch all permits tied to any of those businesses
     const permits = await prisma.permit.findMany({
-      where: { businessId: business.id },
+      where: { 
+        businessId: { in: businessIds } 
+      },
       include: {
         invoice: {
-          select: { id: true, status: true, totalAmount: true, balanceDue: true, paidAt: true },
-        },
+          select: { id: true, status: true, totalAmount: true, balanceDue: true }
+        }
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'desc' }
     });
 
-    return sendSuccess(res, permits);
-  } catch (err) { next(err); }
-};
+    // 3. Shape the response payload data so it matches the exact property structure the frontend components read
+    const formattedPermits = permits.map(p => ({
+      id: p.id,
+      permitNumber: p.permitNumber,
+      permitType: p.permitType ?? 'Trade Permit',
+      status: p.status, // e.g. "issued", "pending"
+      issueDate: p.validFrom,
+      expiryDate: p.validTo,
+      qrToken: p.qrToken ?? `VERIFY-${p.permitNumber}`,
+      
+      // Inject parameters the frontend assumes exist on the root object
+      businessName: businessNameMap.get(p.businessId) || 'Unknown Business',
+      fee: Number(p.invoice?.totalAmount ?? 0), 
+      invoiceId: p.invoice?.id ?? null,
+      
+      // Keep nested invoice relation structure intact just in case
+      invoice: p.invoice
+    }));
 
+    return sendSuccess(res, formattedPermits);
+  } catch (err) { 
+    next(err); 
+  }
+};
 /**
  * GET /api/v1/business/permits/:id
  * Business owner views a single permit — ownership enforced.

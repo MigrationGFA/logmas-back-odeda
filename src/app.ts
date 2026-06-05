@@ -21,6 +21,7 @@ import treasurerRoutes from './modules/treasurer/treasurer.routes';
 import permitRoutes from './modules/permits/permits.routes';
 import gernralRoutes from './modules/general/general.routes';
 import invoiceRoutes from './modules/invoice/invoice.routes';
+import receiptRoutes from './modules/receipts/receipt.routes';
 import dashboardRoutes from './modules/dashboard/dashboard.controller';
 
 import { errorHandler } from './middleware/error.middleware';
@@ -63,6 +64,7 @@ app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/business', businessRoutes);
 app.use('/api/v1/operations/field', fieldOperationsRoutes);
 app.use('/api/v1/uploads', uploadRoutes);
+app.use('/api/v1/receipts', receiptRoutes);
 app.use('/api/v1/chairman',    chairmanRoutes);
 app.use('/api/v1/super-admin', superAdminRoutes);
 

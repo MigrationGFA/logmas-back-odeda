@@ -165,7 +165,7 @@ export const getInvoiceById = async (req: Request, res: Response, next: NextFunc
     const { id: userId, role } = req.user!;
 
     const invoice = await prisma.invoice.findUnique({
-      where: { id:String(id) },
+      where: { invoiceNumber:String(id) },
       include: {
         createdBy: {
           select: { id: true, firstName: true, lastName: true, phone: true },
@@ -203,7 +203,7 @@ export const getInvoiceById = async (req: Request, res: Response, next: NextFunc
       // Re-query ownership check cleanly
       const owned = await prisma.invoice.findFirst({
         where: {
-          id: String(id),
+          invoiceNumber: String(id),
           OR: [
             { createdById: userId },
             { business: { ownerId: userId } },
@@ -300,7 +300,7 @@ export const recordInvoicePayment = async (req: Request, res: Response, next: Ne
     const role   = req.user!.role;
     const { method, amount, reference, narration } = req.body;
 
-    const invoice = await prisma.invoice.findUnique({ where: { id:String(id) } });
+    const invoice = await prisma.invoice.findUnique({ where: { invoiceNumber:String(id) } });
     if (!invoice) return sendError(res, 'Invoice not found', 'NOT_FOUND', null, 404);
 
     if (['paid', 'cancelled'].includes(invoice.status)) {
@@ -366,7 +366,7 @@ export const recordInvoicePayment = async (req: Request, res: Response, next: Ne
       });
 
       const updatedInvoice = await tx.invoice.update({
-        where: { id:String(id) },
+        where: { invoiceNumber:String(id) },
         data: {
           amountPaid: newAmountPaid,
           balanceDue: newBalanceDue,
@@ -445,7 +445,7 @@ export const simulatePayment = async (req: Request, res: Response, next: NextFun
       });
 
       const updatedInvoice = await tx.invoice.update({
-        where: { id:String(id) },
+        where: { invoiceNumber: String(id) },
         data: { amountPaid: total, balanceDue: 0, status: 'paid', paidAt: new Date() },
       });
 

@@ -238,6 +238,100 @@ export const toggleLevyConfig = async (req: Request, res: Response, next: NextFu
   } catch (err) { next(err); }
 };
 
+
+export const listPermitConfigs = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const category = req.query.category as RevenueCategory | undefined;
+    const isActive = req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined;
+    const page = parseInt(req.query.page as string || '1', 10);
+    const limit = parseInt(req.query.limit as string || '20', 10);
+    const skip = (page - 1) * limit;
+
+    const whereClause: any = {};
+    if (category) whereClause.category = category;
+    if (isActive !== undefined) whereClause.isActive = isActive;
+
+    const [configs, total] = await Promise.all([
+      prisma.permitConfig.findMany({
+        where: whereClause,
+        include: {
+          _count: { select: { permits: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+      }),
+      prisma.permitConfig.count({ where: whereClause })
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: configs,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createPermitConfig = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, code, category, baseAmount } = req.body;
+
+    // Check for unique code constraints to prevent raw runtime errors
+    const existingConfig = await prisma.permitConfig.findUnique({
+      where: { code: code.toUpperCase() }
+    });
+
+    if (existingConfig) {
+      return sendError(res, `Configuration variant code "${code}" already exists`, 'CONFLICT', null, 409);
+    }
+
+    const newConfig = await prisma.permitConfig.create({
+      data: {
+        name,
+        code: code.toUpperCase(),
+        category,
+        baseAmount: Number(baseAmount)
+      }
+    });
+
+    return sendSuccess(res, newConfig, 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updatePermitConfig = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { name, baseAmount, isActive } = req.body;
+
+    const config = await prisma.permitConfig.findUnique({ where: { id: String(id) } });
+    if (!config) {
+      return sendError(res, 'Permit configuration not found', 'NOT_FOUND', null, 404);
+    }
+
+    const updatedConfig = await prisma.permitConfig.update({
+      where: { id: String(id) },
+      data: {
+        ...(name && { name }),
+        ...(baseAmount !== undefined && { baseAmount: Number(baseAmount) }),
+        ...(isActive !== undefined && { isActive })
+      }
+    });
+
+    return sendSuccess(res, updatedConfig);
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ─────────────────────────────────────────────────────────────
 // REVENUE ANALYTICS
 // ─────────────────────────────────────────────────────────────

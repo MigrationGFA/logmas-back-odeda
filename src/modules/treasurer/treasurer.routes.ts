@@ -16,11 +16,17 @@ import {
   getAllInvoices,
   getInvoiceById,
   markInvoiceOverdue,
+  updatePermitConfig,
+  createPermitConfig,
+  listPermitConfigs,
 } from './treasurer.controller';
 import {
   createLevyConfigSchema,
+  createPermitConfigSchema,
   listLevyConfigsSchema,
+  listPermitConfigsSchema,
   updateLevyConfigSchema,
+  updatePermitConfigSchema,
 } from './treasurer.validation';
 
 const router = Router();
@@ -879,5 +885,168 @@ router.get('/invoices/:id', getInvoiceById);
  *         description: Invoice not found
  */
 router.patch('/invoices/:id/mark-overdue', markInvoiceOverdue);
+
+
+// ===================== permit config
+
+/**
+ * @openapi
+ * /treasurer/permit-configs:
+ * get:
+ * tags: [Treasurer Operations]
+ * summary: List all permit configurations
+ * description: Retrieve permit configs with optional filters for category and active status
+ * security:
+ * - BearerAuth: []
+ * parameters:
+ * - in: query
+ * name: category
+ * schema:
+ * $ref: '#/components/schemas/RevenueCategory'
+ * description: Filter by revenue category umbrella
+ * - in: query
+ * name: isActive
+ * schema:
+ * type: boolean
+ * description: Filter by active status
+ * - in: query
+ * name: page
+ * schema:
+ * type: integer
+ * default: 1
+ * description: Page number
+ * - in: query
+ * name: limit
+ * schema:
+ * type: integer
+ * default: 20
+ * description: Items per page
+ * responses:
+ * 200:
+ * description: List of permit configurations
+ * content:
+ * application/json:
+ * schema:
+ * type: object
+ * properties:
+ * success:
+ * type: boolean
+ * data:
+ * type: array
+ * items:
+ * type: object
+ * properties:
+ * id:
+ * type: string
+ * name:
+ * type: string
+ * code:
+ * type: string
+ * category:
+ * type: string
+ * baseAmount:
+ * type: number
+ * isActive:
+ * type: boolean
+ * _count:
+ * type: object
+ * properties:
+ * permits:
+ * type: integer
+ * meta:
+ * type: object
+ * properties:
+ * total:
+ * type: integer
+ * page:
+ * type: integer
+ * limit:
+ * type: integer
+ * totalPages:
+ * type: integer
+ */
+router.get(
+  '/permit-configs',
+  validateQuery(listPermitConfigsSchema),
+  listPermitConfigs
+);
+
+/**
+ * @openapi
+ * /treasurer/permit-configs:
+ * post:
+ * tags: [Treasurer Operations]
+ * summary: Create a new permit configuration
+ * description: Provision a new permit tier matrix with base pricing setup
+ * security:
+ * - BearerAuth: []
+ * requestBody:
+ * required: true
+ * content:
+ * application/json:
+ * schema:
+ * type: object
+ * required: [name, code, category, baseAmount]
+ * properties:
+ * name:
+ * type: string
+ * code:
+ * type: string
+ * category:
+ * $ref: '#/components/schemas/RevenueCategory'
+ * baseAmount:
+ * type: number
+ * minimum: 0
+ * responses:
+ * 201:
+ * description: Permit configuration created successfully
+ */
+router.post(
+  '/permit-configs',
+  validateBody(createPermitConfigSchema),
+  createPermitConfig
+);
+
+/**
+ * @openapi
+ * /treasurer/permit-configs/{id}:
+ * patch:
+ * tags: [Treasurer Operations]
+ * summary: Update a permit configuration or toggle status
+ * description: Modify permit baseline metrics or deactivate/activate execution rules
+ * security:
+ * - BearerAuth: []
+ * parameters:
+ * - in: path
+ * name: id
+ * required: true
+ * schema:
+ * type: string
+ * format: uuid
+ * requestBody:
+ * required: true
+ * content:
+ * application/json:
+ * schema:
+ * type: object
+ * properties:
+ * name:
+ * type: string
+ * baseAmount:
+ * type: number
+ * minimum: 0
+ * isActive:
+ * type: boolean
+ * responses:
+ * 200:
+ * description: Permit configuration updated successfully
+ * 404:
+ * description: Permit configuration variant not found
+ */
+router.patch(
+  '/permit-configs/:id',
+  validateBody(updatePermitConfigSchema),
+  updatePermitConfig
+);
 
 export default router;

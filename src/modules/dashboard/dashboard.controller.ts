@@ -46,50 +46,80 @@ export const fetchMetricsByRole = async (role: Role, userId: string) => {
      
       };
     }
-    case Role.business_owner: {
-      // 1. Fetch data associated with the user as an applicant or owner
-      const [applications, businesses, complaints, invoices] = await Promise.all([
-        prisma.stateOfOriginApplication.findMany({
-          where: { applicantId: userId },
-          select: { status: true }
-        }),
-        prisma.business.findMany({
-          where: { ownerId: userId, deletedAt: null },
-          include: { permits: true }
-        }),
-        prisma.complaint.count({
-          where: { raisedById: userId, status: { not: ComplaintStatus.closed } }
-        }),
-        prisma.invoice.findMany({
-          where: { 
-            OR: [
-              { createdById: userId }, // Direct system/self invoices
-              { business: { ownerId: userId } } // Business-related invoices
-            ] 
-          }
-        })
-      ]);
+  case Role.business_owner: {
+  const [businesses, complaints, invoiceAgg, recentInvoices] = await Promise.all([
 
-      // 2. Aggregate metrics for the UI
-      const totalPermits = businesses.reduce((acc, b) => acc + b.permits.length, 0);
-      const pendingInvoices = invoices.filter(inv => inv.status !== InvoiceStatus.paid);
-      const totalPendingAmount = pendingInvoices.reduce((sum, inv) => sum + Number(inv.totalAmount), 0);
-      const approvedApps = applications.filter(a => a.status === ApplicationStatus.approved).length;
+    // Active permits count
+    prisma.permit.count({
+      where: {
+        business: { ownerId: userId },
+        status: 'issued',
+      },
+    }),
 
-      return {
-        metrics: {
-          activePermits: totalPermits,
-          pendingPayments: totalPendingAmount,
-          approvedApplications: approvedApps,
-          openComplaints: complaints
-        },
-        recentBusinesses: businesses.slice(0, 5).map(b => ({
-          name: b.businessName,
-          category: b.category,
-          status: b.isActive ? 'Active' : 'Inactive'
-        }))
-      };
-    }
+    // Open complaints
+    prisma.complaint.count({
+      where: { raisedById: userId, status: { not: 'closed' } },
+    }),
+
+    // Revenue aggregates
+    prisma.invoice.aggregate({
+      where: {
+        OR: [
+          { createdById: userId },
+          { business: { ownerId: userId } },
+        ],
+      },
+      _sum:   { amountPaid: true, balanceDue: true, totalAmount: true },
+      _count: { id: true },
+    }),
+
+    // Recent invoices for the table — shaped to match RecentInvoices component
+    prisma.invoice.findMany({
+      where: {
+        OR: [
+          { createdById: userId },
+          { business: { ownerId: userId } },
+        ],
+      },
+      include: {
+        business:  { select: { businessName: true } },
+        createdBy: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    }),
+  ]);
+
+  // Active notices = unpaid invoices count
+  const activeNotices = await prisma.invoice.count({
+    where: {
+      OR: [
+        { createdById: userId },
+        { business: { ownerId: userId } },
+      ],
+      status: { in: ['sent', 'partially_paid', 'overdue'] },
+    },
+  });
+
+  return {
+    metrics: {
+      activeNotices,
+      totalPaid:     Number(invoiceAgg._sum.amountPaid  ?? 0),
+      outstanding:   Number(invoiceAgg._sum.balanceDue  ?? 0),
+      activePermits: businesses,
+      // openComplaints: complaints,
+    },
+    recentInvoices: recentInvoices.map((inv) => ({
+      id:           inv.id,
+      reference:    inv.invoiceNumber,           // UI reads i.reference
+      customerName: inv.business?.businessName
+        ?? `${inv.createdBy.firstName} ${inv.createdBy.lastName}`,
+      amount:  Number(inv.totalAmount),          // UI reads i.amount
+      status:  inv.status,                       // UI reads i.status
+    })),
+  };
+}
 
     case Role.treasurer:
     case Role.lga_admin:

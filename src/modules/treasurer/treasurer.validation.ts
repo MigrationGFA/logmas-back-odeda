@@ -1,4 +1,5 @@
 // src/modules/treasurer/treasurer.validation.ts
+import { RevenueCategory } from '@prisma/client';
 import { z } from 'zod';
 
 // ── Levy Config ───────────────────────────────────────────────
@@ -66,4 +67,30 @@ export const invoiceFilterSchema = z.object({
   businessId: z.string().uuid().optional(),
   page: z.string().optional().transform((v) => parseInt(v || '1')),
   limit: z.string().optional().transform((v) => parseInt(v || '10')),
+});
+
+export const listPermitConfigsSchema = z.object({
+  query: z.object({
+    category: z.nativeEnum(RevenueCategory).optional(),
+    isActive: z.string().transform(val => val === 'true').optional(),
+    page: z.string().optional().transform(val => val ? parseInt(val, 10) : 1),
+    limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 20)
+  })
+});
+
+export const createPermitConfigSchema = z.object({
+  body: z.object({
+    name: z.string().min(3, "Name must be at least 3 characters long"),
+    code: z.string().min(3, "System identifier code must be at least 3 characters").max(20),
+    category: z.nativeEnum(RevenueCategory),
+    baseAmount: z.number().nonnegative("Base pricing configuration rate cannot be negative")
+  })
+});
+
+export const updatePermitConfigSchema = z.object({
+  body: z.object({
+    name: z.string().min(3).optional(),
+    baseAmount: z.number().nonnegative().optional(),
+    isActive: z.boolean().optional()
+  })
 });

@@ -316,29 +316,54 @@ model Business {
   @@map("businesses")
 }
 
+// 1. New dynamic configuration table for tracking variable costs
+model PermitConfig {
+  id          String          @id @default(uuid())
+  name        String          // e.g., "Annual Trade Permit - Retail", "Event Permit - Plaza"
+  code        String          @unique // e.g., "ATP_RETAIL"
+  baseAmount  Decimal         @db.Decimal(12, 2)
+  category    RevenueCategory // e.g., trade_permit, event_permit
+  isActive    Boolean         @default(true)
+  
+  // Relations
+  permits     Permit[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@map("permit_configs")
+}
+
+// 2. Updated Permit model referencing the dynamic configuration
 model Permit {
-  id               String       @id @default(uuid())
-  permitNumber     String       @unique
-  verificationCode String       @unique
-  qrToken          String       @unique
-  status           PermitStatus @default(draft)
-  permitType       String       // e.g. "Annual Trade Permit", "Event Permit"
-  category         RevenueCategory
-  validFrom        DateTime?
-  validTo          DateTime?
-  pdfUrl           String?
+  id              String          @id @default(uuid())
+  permitNumber    String          @unique
+  verificationCode String          @unique
+  qrToken         String          @unique
+  status          PermitStatus    @default(draft)
+  
+  // RELATIONAL CONFIGURATION REPLACEMENT:
+  // Instead of a simple string or just a raw enum, tie it to the config entity
+  configId        String
+  config          PermitConfig    @relation(fields: [configId], references: [id])
+  
+  // Keep category cached on the row or pull it dynamically via the config relation
+  category        RevenueCategory 
+  
+  validFrom       DateTime?
+  validTo         DateTime?
+  pdfUrl          String?
 
-  businessId       String
-  business         Business     @relation(fields: [businessId], references: [id])
+  businessId      String
+  business        Business        @relation(fields: [businessId], references: [id])
 
-  issuedById       String?
-  issuedBy         User?        @relation("PermitIssuedBy", fields: [issuedById], references: [id])
+  issuedById      String?
+  issuedBy        User?           @relation("PermitIssuedBy", fields: [issuedById], references: [id])
 
-  invoiceId        String?      @unique
-  invoice          Invoice?     @relation(fields: [invoiceId], references: [id])
+  invoiceId       String?         @unique
+  invoice         Invoice?        @relation(fields: [invoiceId], references: [id])
 
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   @@map("permits")
 }
@@ -473,6 +498,7 @@ model Complaint {
   ticketNumber String          @unique @default(cuid())
   title        String
   description  String
+  category      String
   status       ComplaintStatus @default(open)
 
   // Can be raised by citizen or business owner

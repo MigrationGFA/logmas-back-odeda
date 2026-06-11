@@ -271,7 +271,7 @@ router.post(
  */
 router.get(
   '/levy-configs',
-  validateQuery(listLevyConfigsSchema),
+  // validateQuery(listLevyConfigsSchema),
   listLevyConfigs
 );
 

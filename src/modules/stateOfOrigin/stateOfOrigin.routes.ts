@@ -119,7 +119,7 @@ router.get(
   '/admin',
   requireAuth,
   requireRole('lga_admin', 'super_admin'),
-  validateQuery(listApplicationsSchema),
+  // validateQuery(listApplicationsSchema),
   getAllApplications
 );
 router.get(

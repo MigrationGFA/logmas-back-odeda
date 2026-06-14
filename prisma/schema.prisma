@@ -149,53 +149,64 @@ enum Mode {
 // ============================================================
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  phone        String?   @unique
-  password     String
-  firstName    String
-  lastName     String
-  role         Role      @default(citizen)
-  
+  id        String  @id @default(uuid())
+  email     String  @unique
+  phone     String? @unique
+  password  String
+  firstName String
+  lastName  String
+  role      Role    @default(citizen)
+
   // Suspension Infrastructure
-  isActive     Boolean   @default(true)
-  suspendedAt  DateTime? // MISSING ITEM ADDED: Timestamp of suspension
-  suspendedById String?   // MISSING ITEM ADDED: Admin who performed suspension action
+  isActive         Boolean   @default(true)
+  suspendedAt      DateTime? // MISSING ITEM ADDED: Timestamp of suspension
+  suspendedById    String? // MISSING ITEM ADDED: Admin who performed suspension action
   suspendedBy      User?     @relation("UserSuspender", fields: [suspendedById], references: [id])
   // Back-relation: Shows all accounts this specific Admin has suspended
   suspendedUsers   User[]    @relation("UserSuspender")
   suspensionReason String? // MISSING ITEM ADDED: Audit context note (e.g., "Suspected fraud")
 
   // Password Security Audit
-  passwordResetRequired Boolean @default(false) // MISSING ITEM ADDED: Forces user password update on next login
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  passwordResetRequired Boolean   @default(false) // MISSING ITEM ADDED: Forces user password update on next login
+  lastLoginAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
 
   // Profile info
   avatarUrl String?
   address   String?
-  nin       String? 
+  nin       String?
 
   // Global Creation Accountability Tracking Trail
-  createdById String?   // MISSING ITEM ADDED: Tracks who registered this user account globally
-  createdBy   User?     @relation("UserCreator", fields: [createdById], references: [id])
-  createdUsers User[]    @relation("UserCreator")
+  createdById  String? // MISSING ITEM ADDED: Tracks who registered this user account globally
+  createdBy    User?   @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers User[]  @relation("UserCreator")
 
-  // Ward councillor pathing
   wardId String?
-  ward   Ward?   @relation("WardCouncillor", fields: [wardId], references: [id])
+  ward   Ward?   @relation("UserWard", fields: [wardId], references: [id])
+
+  // 2. Strict Political Governance Fence (Max 1 Councillor per Ward)
+  assignedWardId String? @unique
+  assignedWard   Ward?   @relation("WardCouncillor", fields: [assignedWardId], references: [id])
 
   // Contractor hierarchy
-  contractorId String?
-  contractor   User?   @relation("ContractorAgents", fields: [contractorId], references: [id])
-  agents       User[]  @relation("ContractorAgents")
+  contractorId            String?
+  contractor              User?        @relation("ContractorAgents", fields: [contractorId], references: [id])
+  agents                  User[]       @relation("ContractorAgents")
+  commissionRate          Float?       @default(0.0)
+  permittedLevies         LevyConfig[] @relation("UserPermittedLevies")
+  assignedContractorWards Ward[]       @relation("ContractorWards")
 
-  // Field officer pathing
-  supervisorId  String?
-  supervisor    User?   @relation("SupervisorOfficers", fields: [supervisorId], references: [id])
-  fieldOfficers User[]  @relation("SupervisorOfficers")
+  // Add to User model
+  agentId         String?
+  agent           User?   @relation("AgentOfficers", fields: [agentId], references: [id])
+  managedOfficers User[]  @relation("AgentOfficers")
+
+  // // Field officer pathing
+  // supervisorId  String?
+  // supervisor    User?   @relation("SupervisorOfficers", fields: [supervisorId], references: [id])
+  // fieldOfficers User[]  @relation("SupervisorOfficers")
 
   // Document system relationships
   stateOfOriginApplications StateOfOriginApplication[]
@@ -227,8 +238,12 @@ model Ward {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  // The councillor assigned to this ward
-  councillors User[] @relation("WardCouncillor")
+  // 1. Collection of everyone who operates/lives inside this ward fence
+  users User[] @relation("UserWard")
+
+  // 2. The explicit singular politician head managing this node
+  councillor  User?  @relation("WardCouncillor")
+  contractors User[] @relation("ContractorWards")
 
   complaints                Complaint[]
   stateOfOriginApplications StateOfOriginApplication[]
@@ -421,18 +436,19 @@ model Permit {
 // ============================================================
 
 model LevyConfig {
-  id            String          @id @default(uuid())
-  name          String
-  categoryId    String
-  category      RevenueCategory @relation(fields: [categoryId], references: [id])
-  description   String?
-  amount        Decimal         @db.Decimal(12, 2)
-  billingCycle  BillingCycle    @default(one_time)
-  penaltyRate   Decimal?        @db.Decimal(5, 2) // percentage
-  mode          Mode            @default(fixed)
-  isActive      Boolean         @default(true)
-  effectiveFrom DateTime        @default(now())
-  effectiveTo   DateTime?
+  id             String          @id @default(uuid())
+  name           String
+  categoryId     String
+  category       RevenueCategory @relation(fields: [categoryId], references: [id])
+  description    String?
+  amount         Decimal         @db.Decimal(12, 2)
+  billingCycle   BillingCycle    @default(one_time)
+  penaltyRate    Decimal?        @db.Decimal(5, 2) // percentage
+  mode           Mode            @default(fixed)
+  isActive       Boolean         @default(true)
+  effectiveFrom  DateTime        @default(now())
+  effectiveTo    DateTime?
+  permittedUsers User[]          @relation("UserPermittedLevies")
 
   configuredById String
   configuredBy   User   @relation(fields: [configuredById], references: [id])

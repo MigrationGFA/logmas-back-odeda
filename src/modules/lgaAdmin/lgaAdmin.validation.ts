@@ -25,23 +25,23 @@ export const createStaffSchema = z.object({
   email: z.string().email('Valid email is required'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
-  phone: z.string().min(10).optional(),
+  phone: z.string().optional(),
   role: z.enum(['ward_councillor', 'contractor', 'field_officer', 'agent']),
   wardId: z.string().uuid().optional(),       // required when role = ward_councillor
-  contractorId: z.string().uuid().optional(), // required when role = field_officer or agent
+  // contractorId: z.string().uuid().optional(), // required when role = field_officer or agent
 }).refine((data) => {
   if (data.role === 'ward_councillor' && !data.wardId) return false;
   return true;
 }, { message: 'wardId is required when creating a ward councillor' })
-.refine((data) => {
-  if ((data.role === 'field_officer' || data.role === 'agent') && !data.contractorId) return false;
-  return true;
-}, { message: 'contractorId is required when creating a field officer or agent' });
+// .refine((data) => {
+//   if ((data.role === 'field_officer' || data.role === 'agent') && !data.contractorId) return false;
+//   return true;
+// }, { message: 'contractorId is required when creating a field officer or agent' });
 
 export const updateStaffSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
-  phone: z.string().min(10).optional(),
+  phone: z.string().optional(),
   isActive: z.boolean().optional(),
   wardId: z.string().uuid().optional(),
   contractorId: z.string().uuid().optional(),

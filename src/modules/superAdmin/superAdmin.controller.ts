@@ -346,6 +346,48 @@ export const deleteUser = async (req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 };
 
+/**
+ * DELETE /api/v1/lga-admin/accounts/:id
+ * Soft delete — super_admin only.
+ */
+export const deleteAccount = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id }  = req.params;
+    const { id: requesterId } = req.user!;
+ 
+    if (id === requesterId) {
+      return sendError(res, 'You cannot delete your own account', 'BAD_REQUEST', null, 400);
+    }
+ 
+    const target = await prisma.user.findUnique({
+      where: { id:String(id) },
+      select: { id: true, email: true, role: true, deletedAt: true },
+    });
+ 
+    if (!target || target.deletedAt) {
+      return sendError(res, 'Account not found', 'NOT_FOUND', null, 404);
+    }
+ 
+    await prisma.user.update({
+      where: { id:String(id) },
+      data: { deletedAt: new Date(), isActive: false },
+    });
+ 
+    await prisma.auditLog.create({
+      data: {
+        action:   'user_deleted',
+        entity:   'User',
+        entityId: String(id),
+        userId:   requesterId,
+        details:  { email: target.email, role: target.role },
+        ipAddress: getIp(req),
+      },
+    });
+ 
+    return sendSuccess(res, null, 'Account deleted successfully');
+  } catch (err) { next(err); }
+};
+
 // ─────────────────────────────────────────────────────────────
 // GLOBAL ANALYTICS
 // ─────────────────────────────────────────────────────────────

@@ -86,7 +86,7 @@ export const login = async (
       where: { email, deletedAt: null },
     });
 
-    console.log(user,"⛔")
+    // console.log(user,"⛔")
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return sendError(
         res,
@@ -104,6 +104,13 @@ export const login = async (
       wardId: user.wardId
     });
     const refreshToken = generateRefreshToken({ id: user.id });
+
+   await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date()
+      },
+    });
 
     return sendSuccess(res, { accessToken, refreshToken, user: {               // ← THIS was missing
         id:        user.id,

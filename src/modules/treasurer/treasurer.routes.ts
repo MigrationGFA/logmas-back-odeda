@@ -69,7 +69,7 @@ const router = Router();
  */
 
 // Enforce strict treasury access - only treasurer, finance, or super admin
-router.use(requireAuth, requireRole('treasurer', 'super_admin'));
+router.use(requireAuth, requireRole('treasurer', 'super_admin',"lga_admin"));
 
 // ============================================================
 // LEVY CONFIGURATION MANAGEMENT

@@ -1,5 +1,6 @@
 import { Role, Prisma } from "@prisma/client";
 import { prisma } from "../../utils/prisma";
+import { sendError } from "../../utils/response";
 
 interface GetReceiptsQuery {
   role: Role;
@@ -27,6 +28,7 @@ export const fetchAllUserReceipts = async ({
       invoice: {
         include: {
           business: { select: { businessName: true, phone: true } },
+          category:true,
           createdBy: {
             select: { firstName: true, lastName: true, phone: true },
           },
@@ -44,7 +46,7 @@ export const fetchAllUserReceipts = async ({
   });
 
   // Map to align with the frontend useStore keys perfectly
-  return receipts.map((r) => {
+  const allReceipts = receipts.map((r) => {
     const customerName =
       r.invoice.business?.businessName ??
       `${r.invoice.createdBy?.firstName || ""} ${r.invoice.createdBy?.lastName || ""}`.trim();
@@ -54,12 +56,16 @@ export const fetchAllUserReceipts = async ({
       receiptNumber: r.receiptNumber,
       amount: Number(r.amountPaid),
       customerName,
-      levyType: r.invoice.category,
+      levyType: r.invoice.category.name,
       paidAt: r.issuedAt.toISOString(),
       paymentMethod: r.invoice.payments?.[0]?.method ?? "online",
       invoiceId: r.invoiceId,
     };
   });
+
+  return {
+    data:allReceipts
+  }
 };
 
 export const fetchReceiptByIdentifier = async (
@@ -76,6 +82,7 @@ export const fetchReceiptByIdentifier = async (
         include: {
           business: true,
           createdBy: true,
+          category:true,
           assignedOfficer: true,
           payments: {
             // ← add this
@@ -91,6 +98,8 @@ export const fetchReceiptByIdentifier = async (
 
   if (!receipt) return null;
 
+
+  
   // Authorization Shield — add field_officer scope
   if (role === Role.citizen || role === Role.business_owner) {
     const isOwner =
@@ -99,7 +108,10 @@ export const fetchReceiptByIdentifier = async (
     if (!isOwner) return null;
   } else if (role === Role.field_officer) {
     // Officer can only see receipts from invoices they created
-    if (receipt.invoice.createdById !== userId) return null;
+    if (receipt.invoice.createdById !== userId){
+      throw Error("Field Officers can only see receipts from invoices they created")
+      return null;
+    } 
   }
 
   const customerName =
@@ -120,7 +132,7 @@ export const fetchReceiptByIdentifier = async (
       receipt.invoice.business?.phone ??
       receipt.invoice.createdBy?.phone ??
       "N/A",
-    levyType: receipt.invoice.category,
+    levyType: receipt.invoice.category.name,
     officerName: receipt.invoice.assignedOfficer
       ? `${receipt.invoice.assignedOfficer.firstName} ${receipt.invoice.assignedOfficer.lastName}`
       : null,

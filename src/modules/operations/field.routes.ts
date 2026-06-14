@@ -5,13 +5,13 @@ import { requireRole } from '../../middleware/authorize.middleware';
 import { validateBody, validateQuery } from '../../middleware/validate.middleware';
 import {
   registerBusiness,
-  searchBusinesses,
   generateInvoice,
   recordPayment,
   issuePermit,
   verifyReceipt,
   getMyCollections,
   getCollectionSummary,
+  getAllWardBusinesses,
 } from './field.controller';
 import {
   registerBusinessSchema,
@@ -57,7 +57,7 @@ router.post('/businesses', ...guard, validateBody(registerBusinessSchema), regis
  *         schema:
  *           type: string
  */
-router.get('/businesses', ...guard, searchBusinesses);
+router.get('/businesses', ...guard, getAllWardBusinesses);
 
 // ── INVOICES ──────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ router.post('/permits', ...guard, validateBody(issuePermitSchema), issuePermit);
  *         schema:
  *           type: string
  */
-router.get('/receipts/verify/:code', ...guard, verifyReceipt);
+router.get('/receipts/verify/:code', requireAuth, verifyReceipt);
 
 // ── COLLECTIONS ───────────────────────────────────────────────
 

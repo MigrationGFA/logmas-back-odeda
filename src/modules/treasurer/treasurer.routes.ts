@@ -19,6 +19,7 @@ import {
   updatePermitConfig,
   createPermitConfig,
   listPermitConfigs,
+  getTreasurerFieldOfficers,
 } from './treasurer.controller';
 import {
   createLevyConfigSchema,
@@ -567,6 +568,8 @@ router.get('/revenue', getRevenueOverview);
  */
 router.get('/revenue/by-officer', getRevenueByOfficer);
 
+router.get('/field-officers', getTreasurerFieldOfficers);
+
 /**
  * @openapi
  * /treasurer/revenue/by-ward:
@@ -967,7 +970,7 @@ router.patch('/invoices/:id/mark-overdue', markInvoiceOverdue);
  */
 router.get(
   '/permit-configs',
-  validateQuery(listPermitConfigsSchema),
+  // validateQuery(listPermitConfigsSchema),
   listPermitConfigs
 );
 
@@ -1003,7 +1006,7 @@ router.get(
  */
 router.post(
   '/permit-configs',
-  validateBody(createPermitConfigSchema),
+  // validateBody(createPermitConfigSchema),
   createPermitConfig
 );
 
@@ -1045,7 +1048,7 @@ router.post(
  */
 router.patch(
   '/permit-configs/:id',
-  validateBody(updatePermitConfigSchema),
+  // validateBody(updatePermitConfigSchema),
   updatePermitConfig
 );
 

@@ -149,25 +149,41 @@ enum Mode {
 // ============================================================
 
 model User {
-  id          String    @id @default(uuid())
-  email       String    @unique
-  phone       String?   @unique
-  password    String
-  firstName   String
-  lastName    String
-  role        Role      @default(citizen)
-  isActive    Boolean   @default(true)
-  lastLoginAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id           String    @id @default(uuid())
+  email        String    @unique
+  phone        String?   @unique
+  password     String
+  firstName    String
+  lastName     String
+  role         Role      @default(citizen)
+  
+  // Suspension Infrastructure
+  isActive     Boolean   @default(true)
+  suspendedAt  DateTime? // MISSING ITEM ADDED: Timestamp of suspension
+  suspendedById String?   // MISSING ITEM ADDED: Admin who performed suspension action
+  suspendedBy      User?     @relation("UserSuspender", fields: [suspendedById], references: [id])
+  // Back-relation: Shows all accounts this specific Admin has suspended
+  suspendedUsers   User[]    @relation("UserSuspender")
+  suspensionReason String? // MISSING ITEM ADDED: Audit context note (e.g., "Suspected fraud")
 
-  // Profile
+  // Password Security Audit
+  passwordResetRequired Boolean @default(false) // MISSING ITEM ADDED: Forces user password update on next login
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  // Profile info
   avatarUrl String?
   address   String?
-  nin       String? // National Identification Number
+  nin       String? 
 
-  // Ward councillor is tied to a ward
+  // Global Creation Accountability Tracking Trail
+  createdById String?   // MISSING ITEM ADDED: Tracks who registered this user account globally
+  createdBy   User?     @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers User[]    @relation("UserCreator")
+
+  // Ward councillor pathing
   wardId String?
   ward   Ward?   @relation("WardCouncillor", fields: [wardId], references: [id])
 
@@ -176,12 +192,12 @@ model User {
   contractor   User?   @relation("ContractorAgents", fields: [contractorId], references: [id])
   agents       User[]  @relation("ContractorAgents")
 
-  // Field officer is assigned to a contractor
+  // Field officer pathing
   supervisorId  String?
   supervisor    User?   @relation("SupervisorOfficers", fields: [supervisorId], references: [id])
   fieldOfficers User[]  @relation("SupervisorOfficers")
 
-  // Relations
+  // Document system relationships
   stateOfOriginApplications StateOfOriginApplication[]
   businesses                Business[]
   invoicesCreated           Invoice[]                  @relation("InvoiceCreatedBy")
@@ -321,12 +337,18 @@ model Business {
   @@map("businesses")
 }
 
+enum RevenueCategoryType {
+  LEVY
+  PERMIT
+}
+
 model RevenueCategory {
-  id          String       @id @default(uuid())
-  name        String       @unique // e.g., "Trade Permit"
-  slug        String       @unique // e.g., "trade_permit"
+  id          String              @id @default(uuid())
+  name        String              @unique // e.g., "Trade Permit"
+  slug        String              @unique // e.g., "trade_permit"
   description String?
-  isActive    Boolean      @default(true)
+  isActive    Boolean             @default(true)
+  type        RevenueCategoryType @default(LEVY)
 
   // Relations
   levyConfigs   LevyConfig[]
@@ -334,8 +356,8 @@ model RevenueCategory {
   invoices      Invoice[]
   permits       Permit[]
 
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("revenue_categories")
 }
@@ -346,8 +368,8 @@ model PermitConfig {
   name       String // e.g., "Annual Trade Permit - Retail", "Event Permit - Plaza"
   code       String          @unique // e.g., "ATP_RETAIL"
   baseAmount Decimal         @db.Decimal(12, 2)
-  categoryId     String
-  category       RevenueCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  category   RevenueCategory @relation(fields: [categoryId], references: [id])
   isActive   Boolean         @default(true)
 
   // Relations
@@ -372,8 +394,8 @@ model Permit {
   config   PermitConfig @relation(fields: [configId], references: [id])
 
   // Keep category cached on the row or pull it dynamically via the config relation
-  categoryId     String
-  category       RevenueCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  category   RevenueCategory @relation(fields: [categoryId], references: [id])
 
   validFrom DateTime?
   validTo   DateTime?
@@ -401,8 +423,8 @@ model Permit {
 model LevyConfig {
   id            String          @id @default(uuid())
   name          String
-  categoryId     String
-  category       RevenueCategory @relation(fields: [categoryId], references: [id])
+  categoryId    String
+  category      RevenueCategory @relation(fields: [categoryId], references: [id])
   description   String?
   amount        Decimal         @db.Decimal(12, 2)
   billingCycle  BillingCycle    @default(one_time)
@@ -431,8 +453,8 @@ model Invoice {
   id            String          @id @default(uuid())
   invoiceNumber String          @unique @default(cuid())
   status        InvoiceStatus   @default(draft)
-categoryId     String
-  category       RevenueCategory @relation(fields: [categoryId], references: [id])
+  categoryId    String
+  category      RevenueCategory @relation(fields: [categoryId], references: [id])
   description   String?
 
   subtotal      Decimal @db.Decimal(12, 2)

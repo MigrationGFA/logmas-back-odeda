@@ -6,22 +6,7 @@ import { z } from "zod";
 
 export const createLevyConfigSchema = z.object({
   name: z.string().min(2, "Config name is required"),
-  category: z.enum([
-    "trade_permit_fees",
-    "market_levy",
-    "environmental_levy",
-    "signage_permit",
-    "shop_permit",
-    "parking_levy",
-    "haulage_levy",
-    "lockup_store_levy",
-    "business_levy",
-    "mobile_trader_levy",
-    "state_of_origin_fee",
-    "other",
-    "event_permit_fees",
-  ]),
-
+  categoryId: z.string().uuid("Invalid Category ID format. Must be a valid UUID reference."),
   description: z.string().optional(),
   amount: z.number().positive("Amount must be positive"),
   billingCycle: z
@@ -177,7 +162,7 @@ export const createPermitConfigSchema = z.object({
       .string()
       .min(3, "System identifier code must be at least 3 characters")
       .max(20),
-    category: z.string(),
+    categoryId: z.string(),
     baseAmount: z
       .number()
       .nonnegative("Base pricing configuration rate cannot be negative"),

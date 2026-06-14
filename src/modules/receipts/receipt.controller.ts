@@ -20,9 +20,9 @@ export const getReceiptById = async (req: Request, res: Response, next: NextFunc
     const { id: userId, role } = (req as any).user as { id: string; role: Role };
 
     const data = await fetchReceiptByIdentifier(String(id), role, userId);
-    // if (!data) {
-    //   return sendError(res, 'Receipt record not found or unauthorized', 'NOT_FOUND', null, 404);
-    // }
+    if (!data) {
+      sendError(res, 'Receipt record not found or unauthorized', 'NOT_FOUND', null, 404);
+    }
 
     sendSuccess(res, data);
   } catch (error) {

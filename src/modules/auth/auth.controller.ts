@@ -101,6 +101,7 @@ export const login = async (
       id: user.id,
       role: user.role,
       email: user.email,
+      wardId: user.wardId
     });
     const refreshToken = generateRefreshToken({ id: user.id });
 

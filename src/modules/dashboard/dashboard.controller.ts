@@ -4,10 +4,11 @@ import {
   PermitStatus,
   ApplicationStatus,
   ComplaintStatus,
+  User,
 } from "@prisma/client";
 import { prisma } from "../../utils/prisma";
 
-export const fetchMetricsByRole = async (role: Role, userId: string) => {
+export const fetchMetricsByRole = async (role: Role, userId: string,user:User) => {
   switch (role) {
     case Role.citizen: {
       // 1. Fetch data associated with the user as an applicant or owner
@@ -156,7 +157,7 @@ export const fetchMetricsByRole = async (role: Role, userId: string) => {
         }),
         // Grouping by description/category fallback to isolate dynamic configurations
         prisma.invoice.groupBy({
-          by: ["category"],
+          by: ["categoryId"],
           where: { status: InvoiceStatus.paid },
           _sum: { amountPaid: true },
           orderBy: {
@@ -211,7 +212,7 @@ export const fetchMetricsByRole = async (role: Role, userId: string) => {
 
       // 3. Transform dynamic billing matrix category text for the progress distribution block
       const breakdownByCategory = revenueByInvoiceGroup.map((group) => ({
-        category: group.category,
+        category: group.categoryId,
         amount: Number(group._sum.amountPaid || 0),
       }));
 
@@ -314,22 +315,147 @@ export const fetchMetricsByRole = async (role: Role, userId: string) => {
     }
 
     case Role.field_officer: {
-      // Field Officer scope: Individual performance
-      const [issuedInvoices, collectedAmount] = await Promise.all([
-        prisma.invoice.count({
-          where: { createdById: userId },
-        }),
-        prisma.invoice.aggregate({
-          where: { createdById: userId, status: InvoiceStatus.paid },
-          _sum: { amountPaid: true },
-        }),
-      ]);
+      // Enforce strict geographic fallback checks
+      if (!user.wardId) {
+        throw new Error(
+          "Field Officer must have an assigned wardId to load metrics.",
+        );
+      }
 
+      // Execute efficient data sweeps across invoices, payments, and receipts in parallel
+      const [invoicesInWard, paymentsInWard, recentInvoicesRaw] =
+        await Promise.all([
+          // 1. Fetch total context mapping of invoices inside this ward
+          prisma.invoice.findMany({
+            where: {
+              business: {
+                wardId: user.wardId,
+              },
+              status: { not: "cancelled" },
+            },
+            select: {
+              id: true,
+              status: true,
+              totalAmount: true,
+            },
+          }),
+
+          // 2. Scan confirmed payments impacting this ward to calculate payment channel splits
+          prisma.payment.findMany({
+            where: {
+              status: "confirmed",
+              invoice: {
+                business: {
+                  wardId: user.wardId,
+                },
+              },
+            },
+            select: {
+              amount: true,
+              method: true,
+            },
+          }),
+
+          // 3. Pull recent invoice data for the RecentInvoices feed component array
+          prisma.invoice.findMany({
+            where: {
+              business: {
+                wardId: user.wardId,
+              },
+            },
+            take: 5,
+            orderBy: {
+              createdAt: "desc",
+            },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              totalAmount: true,
+              status: true,
+              business: {
+                select: {
+                  businessName: true,
+                  ownerName: true,
+                },
+              },
+            },
+          }),
+        ]);
+
+      // 4. Reduce Row 1 Metrics: Status & Total Volumes
+      const totalInvoicesGenerated = invoicesInWard.length;
+      let pendingCount = 0;
+      let overdueCount = 0;
+
+      invoicesInWard.forEach((inv) => {
+        // UI expects "unpaid" to match unpaid/sent status maps
+        if (inv.status === "draft" || inv.status === "sent") {
+          pendingCount++;
+        } else if (inv.status === "overdue") {
+          overdueCount++;
+        }
+      });
+
+      // 5. Reduce Row 2 Metrics: Dynamic Payment Method Channels
+      let totalCollected = 0;
+      let cashTotal = 0;
+      let posTotal = 0;
+      let onlineTotal = 0;
+      let transferTotal = 0;
+
+      paymentsInWard.forEach((pay) => {
+        const amt = Number(pay.amount || 0);
+        totalCollected += amt;
+
+        switch (pay.method) {
+          case "cash":
+            cashTotal += amt;
+            break;
+          case "pos":
+            posTotal += amt;
+            break;
+          case "online_gateway":
+            onlineTotal += amt;
+            break;
+          case "bank_transfer":
+          case "virtual_account":
+            transferTotal += amt;
+            break;
+          default:
+            break;
+        }
+      });
+
+      // 6. Map Recent Invoices precisely to match the RecentInvoiceItem frontend contract
+      const formattedRecentInvoices = recentInvoicesRaw.map((inv) => ({
+        id: inv.id,
+        reference: inv.invoiceNumber,
+        customerName:
+          inv.business?.businessName ||
+          inv.business?.ownerName ||
+          "Walk-in Taxpayer",
+        amount: Number(inv.totalAmount || 0),
+        status:
+          inv.status === "draft" || inv.status === "sent"
+            ? "unpaid"
+            : inv.status, // Normalizing status strings
+      }));
+
+      // Return formatted response structure
       return {
         metrics: {
-          invoicesIssued: issuedInvoices,
-          totalCollected: Number(collectedAmount._sum.amountPaid || 0),
+          totalInvoicesGenerated,
+          totalCollected,
+          pendingCount,
+          overdueCount,
+          channelBreakdown: {
+            cash: cashTotal,
+            pos: posTotal,
+            online: onlineTotal,
+            transfer: transferTotal,
+          },
         },
+        recentInvoices: formattedRecentInvoices,
       };
     }
 
@@ -354,8 +480,21 @@ export const getDashboardOverview = async (
       role: Role;
     };
 
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user) {
+      sendError(
+        res,
+        "User record profile could not be localized",
+        "NOT_FOUND",
+        null,
+        404,
+      );
+      return;
+    }
+
     // Invoke our extracted service helper
-    const payload = await fetchMetricsByRole(role, userId);
+    const payload = await fetchMetricsByRole(role, userId,user);
 
     res.status(200).json({
       success: true,
@@ -374,6 +513,7 @@ export const getDashboardOverview = async (
 
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { sendError } from "../../utils/response";
 // Adjust to your auth file location
 
 const router = Router();

@@ -64,7 +64,6 @@ export const createLevyConfig = async (
         mode,
         description,
         amount,
-        billingCycle: billingCycle ?? "yearly",
         penaltyRate,
         isActive: true,
         effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(),
@@ -136,6 +135,7 @@ export const listLevyConfigs = async (
           configuredBy: {
             select: { id: true, firstName: true, lastName: true },
           },
+          category:true,
           _count: { select: { invoices: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -235,6 +235,7 @@ export const updateLevyConfig = async (
       },
       include: {
         configuredBy: { select: { id: true, firstName: true, lastName: true } },
+        category: true
       },
     });
 
@@ -332,6 +333,7 @@ export const listPermitConfigs = async (
         where: whereClause,
         include: {
           _count: { select: { permits: true } },
+          category:true
         },
         orderBy: { createdAt: "desc" },
         skip,
@@ -361,7 +363,7 @@ export const createPermitConfig = async (
   next: NextFunction,
 ) => {
   try {
-    const { name, code, category, baseAmount } = req.body;
+    const { name, code, categoryId, baseAmount } = req.body;
 
     // Check for unique code constraints to prevent raw runtime errors
     const existingConfig = await prisma.permitConfig.findUnique({
@@ -382,7 +384,7 @@ export const createPermitConfig = async (
       data: {
         name,
         code: code.toUpperCase(),
-        category,
+        categoryId,
         baseAmount: Number(baseAmount),
       },
     });
@@ -413,6 +415,10 @@ export const updatePermitConfig = async (
         null,
         404,
       );
+    }
+
+    if(config.name === name){
+      return sendError(res,"Conflict with name","CONFLICT",401)
     }
 
     const updatedConfig = await prisma.permitConfig.update({
@@ -605,6 +611,86 @@ export const getRevenueByOfficer = async (
     });
   } catch (err) {
     next(err);
+  }
+};
+
+
+export const getTreasurerFieldOfficers = async (req: Request, res: Response) => {
+  try {
+    // 1. Fetch all field officers. 
+    // Note: Treasurer has view-only access, so we don't need complex filtering by contractorId here.
+    const officers = await prisma.user.findMany({
+      where: {
+        role: 'field_officer',
+        deletedAt: null, // Exclude soft-deleted users
+      },
+      include: {
+        ward: true,
+        createdBy: true,
+        invoicesAssignedTo: {
+          include: {
+            category: true,
+            payments: {
+              where: { status: 'confirmed' },
+              select: { amount: true }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // 2. Map the data to match the frontend's expected structure
+    const mappedOfficers = officers.map((o) => {
+      // Calculate total collected from confirmed payments on their assigned invoices
+      const totalCollected = o.invoicesAssignedTo.reduce((sum, inv) => {
+        const invTotal = inv.payments.reduce((pSum, p) => pSum + Number(p.amount), 0);
+        return sum + invTotal;
+      }, 0);
+
+      // Extract unique levy categories they are assigned to
+      const levies = [...new Set(o.invoicesAssignedTo.map((inv) => inv.category.name))];
+
+      // Determine status based on suspension/deletion flags in the DB
+      let status: 'active' | 'suspended' | 'deactivated' = 'active';
+      if (o.deletedAt) status = 'deactivated';
+      else if (o.suspendedAt) status = 'suspended';
+
+      return {
+        id: o.id,
+        name: `${o.firstName} ${o.lastName}`,
+        email: o.email,
+        ward: o.ward?.name || 'Unassigned',
+        levies: levies.length > 0 ? levies : ['General'], // Fallback if no invoices assigned yet
+        invoicesIssued: o.invoicesAssignedTo.length,
+        totalCollected,
+        status,
+        createdBy: o.createdBy 
+          ? `${o.createdBy.firstName} ${o.createdBy.lastName}` 
+          : 'System',
+        // Keeping contractorId in case the frontend needs it for any residual logic
+        contractorId: o.contractorId, 
+      };
+    });
+
+    // 3. Calculate summary stats for the dashboard cards
+    const stats = {
+      totalOfficers: mappedOfficers.length,
+      active: mappedOfficers.filter((o) => o.status === 'active').length,
+      suspended: mappedOfficers.filter((o) => o.status === 'suspended').length,
+      totalCollected: mappedOfficers.reduce((sum, o) => sum + o.totalCollected, 0),
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        stats,
+        officers: mappedOfficers,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching field officers for treasurer:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 

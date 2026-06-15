@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/authorize.middleware';
 import {
-  getOverview, 
+  getChairmanOverview, 
   getRevenueTrend,
   getWardPerformance, 
   getApplicationStats, 
@@ -146,7 +146,7 @@ const guard = [requireAuth, requireRole('chairman', 'super_admin')];
  *       500:
  *         description: Internal server error
  */
-router.get('/overview', ...guard, getOverview);
+router.get('/overview', ...guard, getChairmanOverview);
 
 /**
  * @openapi

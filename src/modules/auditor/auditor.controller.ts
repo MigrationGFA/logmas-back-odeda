@@ -28,40 +28,119 @@ const buildDateRange = (from?: string, to?: string) => {
  */
 export const getAuditLogs = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const action   = queryString(req.query.action)  as AuditAction | undefined;
-    const userId   = queryString(req.query.userId);
-    const entity   = queryString(req.query.entity);
-    const from     = queryString(req.query.from);
-    const to       = queryString(req.query.to);
-    const page     = parseInt(queryString(req.query.page)  ?? '1');
-    const limit    = parseInt(queryString(req.query.limit) ?? '20');
-    const skip     = (page - 1) * limit;
+    const action = queryString(req.query.action) as AuditAction | undefined;
+    const userId = queryString(req.query.userId);
+    const entity = queryString(req.query.entity);
+    const search = queryString(req.query.search); // for UI search box
+    const from   = queryString(req.query.from);
+    const to     = queryString(req.query.to);
+    const page   = parseInt(queryString(req.query.page)  ?? '1');
+    const limit  = parseInt(queryString(req.query.limit) ?? '50');
+    const skip   = (page - 1) * limit;
 
     const where: any = {};
-    if (action) where.action   = action;
-    if (userId) where.userId   = userId;
-    if (entity) where.entity   = entity;
+    if (action) where.action = action;
+    if (userId) where.userId = userId;
+    if (entity) where.entity = entity;
     if (from || to) where.createdAt = buildDateRange(from, to);
 
-    const [logs, total] = await Promise.all([
+    // Search across action, entity, entityId
+    if (search) {
+      where.OR = [
+        { action:   { contains: search, mode: 'insensitive' } },
+        { entity:   { contains: search, mode: 'insensitive' } },
+        { entityId: { contains: search, mode: 'insensitive' } },
+        { user: { firstName: { contains: search, mode: 'insensitive' } } },
+        { user: { lastName:  { contains: search, mode: 'insensitive' } } },
+        { user: { email:     { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [logs, total, actionCounts] = await Promise.all([
       prisma.auditLog.findMany({
         where,
         skip,
         take: limit,
         include: {
           user: {
-            select: { id: true, firstName: true, lastName: true, email: true, role: true },
+            select: {
+              id: true, firstName: true,
+              lastName: true, email: true, role: true,
+            },
           },
         },
         orderBy: { createdAt: 'desc' },
       }),
+
       prisma.auditLog.count({ where }),
+
+      // Stat card counts — always unfiltered for accurate totals
+      prisma.auditLog.groupBy({
+        by: ['action'],
+        _count: { _all: true },
+      }),
     ]);
 
+    // Build stat counts from groupBy
+    const countMap = actionCounts.reduce((acc: Record<string, number>, r) => {
+      acc[r.action] = r._count._all;
+      return acc;
+    }, {});
+
+    const paymentEvents = (countMap['payment_confirmed'] ?? 0) +
+                          (countMap['payment_reversed']  ?? 0);
+    const permitEvents  = (countMap['permit_issued']     ?? 0) +
+                          (countMap['permit_revoked']    ?? 0);
+    const suspicious    = (countMap['payment_reversed']  ?? 0) +
+                          (countMap['login_failed']      ?? 0);
+
+    // Shape each log to match UI field names exactly
+    const shaped = logs.map((log) => ({
+      id:        log.id,
+      createdAt: log.createdAt.toISOString(),
+
+      // UI reads actor as a display name string
+      actor: log.user
+        ? `${log.user.firstName} ${log.user.lastName}`
+        : 'System',
+
+      // UI reads actorRole as a badge
+      actorRole: log.user?.role ?? 'system',
+
+      // UI reads action as a badge — keep uppercase for visual consistency
+      action: log.action.toUpperCase(),
+
+      // UI reads target — use entityId (invoice number, user email etc)
+      // Fall back to entity type if no ID
+      target: log.entityId ?? log.entity ?? '—',
+
+      // UI reads meta as JSON.stringify'd object
+      meta: log.details ?? null,
+
+      // Extra fields available if UI needs them later
+      entity:    log.entity,
+      entityId:  log.entityId,
+      ipAddress: log.ipAddress,
+      email:     log.user?.email ?? null,
+    }));
+
     return sendSuccess(res, {
-      data: logs,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
-    });
+      // Stat cards
+      stats: {
+        total:         total,
+        paymentEvents,
+        permitEvents,
+        suspicious,
+      },
+      // Table rows
+      data: shaped,
+      
+    }, {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },);
   } catch (err) { next(err); }
 };
 

@@ -509,6 +509,9 @@ export const simulatePayment = async (
 
     const invoice = await prisma.invoice.findUnique({
       where: { invoiceNumber: String(id) },
+      include:{
+        stateOfOriginApplication:true
+      }
     });
     if (!invoice)
       return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
@@ -552,6 +555,17 @@ export const simulatePayment = async (
           issuedById: userId,
         },
       });
+
+      if (invoice.stateOfOriginApplication) {
+         await tx.stateOfOriginApplication.update({
+          where: { id: invoice.stateOfOriginApplication.id },
+          data: {
+            // Adjust 'paid' or 'pending_approval' based on your exact enum setup
+            status: "paid", 
+            // paymentConfirmedAt: new Date()
+          }
+        });
+      }
 
       return { payment, invoice: updatedInvoice, receipt };
     });

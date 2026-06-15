@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../utils/prisma';
 import { sendSuccess, sendError } from '../../utils/response';
 import { generateReceiptNumber, generateVerificationCode, generateQrToken } from '../../utils/generators';
+import { ApplicationStatus } from '@prisma/client';
 
 // ─────────────────────────────────────────────────────────────
 // CITIZEN
@@ -43,11 +44,24 @@ export const submitApplication = async (req: Request, res: Response, next: NextF
     const ward = await prisma.ward.findUnique({ where: { id: wardId } });
     if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
 
-    // Fetch levy config for state of origin fee (set by Treasurer)
-    const levyConfig = await prisma.levyConfig.findFirst({
-      where: { category: 'state_of_origin_fee', isActive: true },
-    });
+   const stateOfOriginCategory = await prisma.revenueCategory.findUnique({
+  where: { slug: 'state_of_origin_fee' },
+});
 
+if (!stateOfOriginCategory) {
+  return sendError(
+    res,
+    'State of Origin fee category not configured. Contact the administrator.',
+    'BAD_REQUEST',
+    null,
+    400
+  );
+}
+
+// Then fetch the levy config using the real UUID
+const levyConfig = await prisma.levyConfig.findFirst({
+  where: { categoryId: stateOfOriginCategory.id, isActive: true },
+});
     // Create application + invoice in one transaction
     const result = await prisma.$transaction(async (tx) => {
       const application = await tx.stateOfOriginApplication.create({
@@ -71,7 +85,7 @@ export const submitApplication = async (req: Request, res: Response, next: NextF
 
       const invoice = await tx.invoice.create({
         data: {
-          category: 'state_of_origin_fee',
+          categoryId: stateOfOriginCategory.id,
           description: `State of Origin Application — ${fullName}`,
           subtotal: totalAmount,
           totalAmount,
@@ -126,7 +140,7 @@ export const getMyApplications = async (req: Request, res: Response, next: NextF
       orderBy: { createdAt: 'desc' },
     });
 
-    return sendSuccess(res, applications);
+    return sendSuccess(res, {data:applications});
   } catch (err) { next(err); }
 };
 
@@ -310,7 +324,7 @@ export const getCouncillorQueue = async (req: Request, res: Response, next: Next
       orderBy: { createdAt: 'asc' }, // oldest first — process in order
     });
 
-    return sendSuccess(res, applications);
+    return sendSuccess(res, {data:applications});
   } catch (err) { next(err); }
 };
 
@@ -346,6 +360,7 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
       return sendError(res, 'Application is not pending councillor decision', 'BAD_REQUEST', null, 400);
     }
 
+    // ❌ CASE 1: REJECTED
     if (decision === 'rejected') {
       const updated = await prisma.stateOfOriginApplication.update({
         where: { id },
@@ -365,34 +380,43 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
           entityId: id,
           userId: councillorId,
           details: { rejectionReason },
-          ipAddress: req.ip,
+          ipAddress: req.ip || '127.0.0.1',
         },
       });
 
-      // TODO: Notify citizen of rejection
-      return sendSuccess(res, updated, 'Application rejected');
+      // TODO: Notify citizen of rejection via SMS / Email
+      return sendSuccess(res, updated, 'Application rejected successfully');
     }
 
-    // APPROVED — generate certificate in transaction
+    // ✅ CASE 2: APPROVED — generate certificate securely in single isolation transaction
     const result = await prisma.$transaction(async (tx) => {
+      
+      // 🚀 Fix: Flip status string to 'approved' to guarantee a match for getCertificateData
       const updatedApplication = await tx.stateOfOriginApplication.update({
         where: { id },
         data: {
-          status: 'certificate_issued',
+          status: 'approved', 
           approvedByCouncillorId: councillorId,
           approvedByCouncillorAt: new Date(),
           councillorNotes,
         },
       });
 
+      // Generate custom serial token matching your UI screenshot format layout context
+      const currentYear = new Date().getFullYear();
+      const randomSuffix = Math.floor(10000 + Math.random() * 90000); // 5-digit verification serial fallback
+      const shortId = id.slice(0, 5).toUpperCase();
+      
+      const generatedCertNo = `INE-${currentYear}-${shortId}`;
+      const uniqueVerificationCode = `V-CODE-${currentYear}-${randomSuffix}`;
+
       const certificate = await tx.certificate.create({
         data: {
           applicationId: id,
-          certificateNumber: generateReceiptNumber('CERT'),
-          verificationCode: generateVerificationCode(),
-          qrToken: generateQrToken(),
+          certificateNumber: generatedCertNo, // Matches "INE-2026-08214" layout template format schema
+          verificationCode: uniqueVerificationCode,
+          qrToken: generatedCertNo,
           issuedAt: new Date(),
-          // expiresAt — optional, set if needed
         },
       });
 
@@ -405,14 +429,14 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
         entity: 'Certificate',
         entityId: result.certificate.id,
         userId: councillorId,
-        details: { applicationId: id },
-        ipAddress: req.ip,
+        details: { applicationId: id, certificateNumber: result.certificate.certificateNumber },
+        ipAddress: req.ip || '127.0.0.1',
       },
     });
 
-    // TODO: Notify citizen — certificate ready for download
+    // TODO: Notify citizen — certificate ready for download via background mail task context
 
-    return sendSuccess(res, result, 'Application approved and certificate issued');
+    return sendSuccess(res, result, 'Application approved and certificate issued successfully');
   } catch (err) { next(err); }
 };
 
@@ -420,32 +444,32 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
 // PUBLIC — Verification (no auth required)
 // ─────────────────────────────────────────────────────────────
 
+
 /**
  * GET /api/v1/state-of-origin/verify/:code
- * Anyone can verify a certificate by verification code or QR token.
+ * Public verification page endpoint
  */
 export const verifyCertificate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // const { code } = req.params;
-     const code = Array.isArray(req.params.code) 
+    const code = Array.isArray(req.params.code) 
       ? req.params.code[0] 
       : req.params.code;
 
+    // Search explicitly by certificate credentials
     const certificate = await prisma.certificate.findFirst({
       where: {
-        OR: [{ verificationCode: code }, { qrToken: code }],
+        OR: [
+          { certificateNumber: code },
+          { verificationCode: code }, 
+          { qrToken: code }
+        ],
       },
       include: {
         application: {
-          select: {
-            fullName: true,
-            gender: true,
-            address: true,
-            purpose: true,
-            status: true,
-            ward: { select: { name: true } },
-            applicant: { select: { email: true } },
-          },
+          include: {
+            ward: true,
+            applicant: true
+          }
         },
       },
     });
@@ -455,18 +479,81 @@ export const verifyCertificate = async (req: Request, res: Response, next: NextF
     }
 
     const isExpired = certificate.expiresAt ? certificate.expiresAt < new Date() : false;
+    const app = certificate.application;
 
     return sendSuccess(res, {
-      valid: !isExpired,
+      valid: !isExpired && app.status === "approved",
       certificateNumber: certificate.certificateNumber,
       issuedAt: certificate.issuedAt,
       expiresAt: certificate.expiresAt,
       isExpired,
-      holder: certificate.application.fullName,
-      gender: certificate.application.gender,
-      ward: certificate.application.ward.name,
-      purpose: certificate.application.purpose,
+      holder: (app.fullName || `${app.applicant?.firstName} ${app.applicant?.lastName}`).toUpperCase(),
+      gender: app.gender || "N/A",
+      ward: app.ward?.name || "Central",
+      purpose: app.purpose || "General Purpose",
       issuingAuthority: 'Ijebu North East Local Government',
     });
+  } catch (err) { next(err); }
+};
+
+/**
+ * GET /api/v1/soo/applications/:applicationId/certificate
+ * Fetches data for Lovable's print layout page wrapper
+ */
+export const getCertificateData = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { applicationId } = req.params;
+
+    // 1. Fetch the certificate first, pulling along its application tree metadata
+    const certificate = await prisma.certificate.findUnique({
+      where: { applicationId: String(applicationId) },
+      include: {
+        application: {
+          include: {
+            applicant: true,
+            ward: true
+          }
+        }
+      }
+    });
+
+    if (!certificate) {
+      return sendError(res, "Official approved certificate record not found", "NOT_FOUND", null, 404);
+    }
+
+    const app = certificate.application;
+
+    // 2. Safeguard councillor name lookups against unexpected null fields
+    let councillorNameString = "Hon. Administrative Chairman";
+    if (app.approvedByCouncillorId) {
+      const councillor = await prisma.user.findUnique({
+        where: { id: app.approvedByCouncillorId },
+        select: { firstName: true, lastName: true }
+      });
+      if (councillor) {
+        councillorNameString = `Hon. ${councillor.firstName} ${councillor.lastName}`;
+      }
+    }
+
+    // 3. Build the perfect UI-ready payload contract match pattern
+    const payload = {
+      id: app.id,
+      fullName: (app.fullName || `${app.applicant?.firstName} ${app.applicant?.lastName}`).toUpperCase(),
+      dateOfBirth: app.dateOfBirth 
+        ? new Date(app.dateOfBirth).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) 
+        : "Not Specified",
+      gender: app.gender || "N/A",
+      ward: app.ward?.name || "Central",
+      state: "Ogun State",
+      issuedAt: certificate.issuedAt,
+      certificateNumber: certificate.certificateNumber,
+      councillorName: councillorNameString,
+      issuedBy: "Ijebu North East LGA Council",
+      // Build the live routing link so the scanned QR takes users directly to the confirmation screen
+      verificationUrl: `https://logmas.gov.ng/verify/${certificate.certificateNumber}`,
+      qrToken: certificate.qrToken
+    };
+
+    return sendSuccess(res, payload, "Certificate metrics compiled successfully");
   } catch (err) { next(err); }
 };

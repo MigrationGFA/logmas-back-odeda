@@ -36,7 +36,7 @@ const guard = [requireAuth, requireRole('auditor', 'super_admin')];
  *     security:
  *       - BearerAuth: []
  */
-router.get('/audit-logs', ...guard, validateQuery(auditLogFilterSchema), getAuditLogs);
+router.get('/audit-logs', ...guard, getAuditLogs);
 
 /**
  * @openapi

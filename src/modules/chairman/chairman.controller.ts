@@ -17,86 +17,100 @@ const buildDateRange = (from?: string, to?: string) => {
  * GET /api/v1/chairman/overview
  * Top-level KPIs for executive dashboard.
  */
-export const getOverview = async (req: Request, res: Response, next: NextFunction) => {
+export const getChairmanOverview = async (req: any, res: Response, next: NextFunction) => {
   try {
-    const from = queryString(req.query.from);
-    const to   = queryString(req.query.to);
-    const dateRange = buildDateRange(from, to);
+    const from = req.query.from ? String(req.query.from) : undefined;
+    const to   = req.query.to ? String(req.query.to) : undefined;
+    const dateRange = buildDateRange(from, to); // Assumes your helper parses this safely
 
+    // 1. Gather all executive statistics in a fast single roundtrip promise block
     const [
       revenueSummary,
-      totalBusinesses,
-      totalWards,
+      activeOfficersCount,
+      unpaidInvoicesCount,
       applicationStats,
       complaintStats,
       permitStats,
+      totalWards,
     ] = await Promise.all([
+      // Revenue Aggregations
       prisma.invoice.aggregate({
         where: { createdAt: dateRange },
-        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+        _sum: { amountPaid: true, totalAmount: true },
         _count: { _all: true },
       }),
-      prisma.business.count({ where: { isActive: true } }),
-      prisma.ward.count({ where: { deletedAt: null } }),
+      // Active field officer count
+      prisma.user.count({
+        where: { role: 'field_officer', isActive:true }
+      }),
+      // Unpaid invoices count
+      prisma.invoice.count({
+        where: { status: 'sent' }
+      }),
+      // Application Grouping
       prisma.stateOfOriginApplication.groupBy({
         by: ['status'],
         _count: { _all: true },
       }),
+      // Complaints Grouping
       prisma.complaint.groupBy({
         by: ['status'],
         _count: { _all: true },
       }),
+      // Active Permits Grouping
       prisma.permit.groupBy({
         by: ['status'],
         _count: { _all: true },
       }),
+      // Total operational wards for baseline coverage metrics
+      prisma.ward.count({ where: { deletedAt: null } })
     ]);
 
-    const applications = applicationStats.reduce((acc: Record<string, number>, s) => {
-      acc[s.status] = s._count._all; return acc;
+    // 2. Map Array reductions to object index lookup tables
+    const apps = applicationStats.reduce((acc: Record<string, number>, curr) => {
+      acc[curr.status] = curr._count._all; return acc;
     }, {});
 
-    const complaints = complaintStats.reduce((acc: Record<string, number>, s) => {
-      acc[s.status] = s._count._all; return acc;
+    const complaints = complaintStats.reduce((acc: Record<string, number>, curr) => {
+      acc[curr.status] = curr._count._all; return acc;
     }, {});
 
-    const permits = permitStats.reduce((acc: Record<string, number>, s) => {
-      acc[s.status] = s._count._all; return acc;
+    const permits = permitStats.reduce((acc: Record<string, number>, curr) => {
+      acc[curr.status] = curr._count._all; return acc;
     }, {});
 
-    const collectionRate = revenueSummary._sum.totalAmount
-      ? ((Number(revenueSummary._sum.amountPaid) / Number(revenueSummary._sum.totalAmount)) * 100).toFixed(2)
-      : '0.00';
+    // 3. Map values directly into the unified dashboard metrics interface contract
+    const totalRevenue = Number(revenueSummary._sum.amountPaid || 0);
+    const activePermits = permits['issued'] || 0;
+    
+    // Tally up specific UI indicators
+    const pendingApplications = apps['pending'] || 0;
+    const approvedCertificates = apps['approved'] || 0;
+    const pendingComplaints = complaints['open'] || complaints['in_progress'] || 0;
 
     return sendSuccess(res, {
-      period: { from: dateRange.gte, to: dateRange.lte },
-      revenue: {
-        totalInvoiced:    revenueSummary._sum.totalAmount  ?? 0,
-        totalCollected:   revenueSummary._sum.amountPaid   ?? 0,
-        totalOutstanding: revenueSummary._sum.balanceDue   ?? 0,
-        collectionRate:   `${collectionRate}%`,
-        totalInvoices:    revenueSummary._count._all,
-      },
-      operations: {
-        totalBusinesses,
-        totalWards,
-        applications: {
-          total: Object.values(applications).reduce((s, c) => s + c, 0),
-          breakdown: applications,
-        },
-        complaints: {
-          total: Object.values(complaints).reduce((s, c) => s + c, 0),
-          open:  complaints['open'] ?? 0,
-          breakdown: complaints,
-        },
-        permits: {
-          total:  Object.values(permits).reduce((s, c) => s + c, 0),
-          issued: permits['issued'] ?? 0,
-          breakdown: permits,
-        },
-      },
+      success: true,
+      role: "chairman",
+      metrics: {
+        // Core Management Schema Parameters
+        totalRevenue,
+        activePermits,
+        overdueInvoices: unpaidInvoicesCount, 
+        wardCoverage: totalWards,
+
+        // Specific Chairman UI Hook Data points
+        pendingApplications,
+        approvedCertificates,
+        pendingComplaints,
+        activeOfficersCount,
+        totalInvoicesCount: revenueSummary._count._all,
+        pendingBillsCount: unpaidInvoicesCount
+      }
     });
-  } catch (err) { next(err); }
+
+  } catch (err) { 
+    next(err); 
+  }
 };
 
 /**
@@ -111,7 +125,7 @@ export const getRevenueTrend = async (req: Request, res: Response, next: NextFun
 
     const [byCategory, dailyTrend] = await Promise.all([
       prisma.invoice.groupBy({
-        by: ['category'],
+        by: ['categoryId'],
         where: { createdAt: dateRange },
         _sum: { totalAmount: true, amountPaid: true },
         _count: { _all: true },
@@ -129,7 +143,7 @@ export const getRevenueTrend = async (req: Request, res: Response, next: NextFun
     return sendSuccess(res, {
       period: { from: dateRange.gte, to: dateRange.lte },
       byCategory: byCategory.map((c) => ({
-        category:    c.category,
+        // category:    c.category,
         invoiced:    c._sum.totalAmount ?? 0,
         collected:   c._sum.amountPaid  ?? 0,
         invoiceCount: c._count._all,
@@ -152,7 +166,7 @@ export const getWardPerformance = async (req: Request, res: Response, next: Next
     const wards = await prisma.ward.findMany({
       where: { deletedAt: null },
       include: {
-        councillors: { select: { id: true, firstName: true, lastName: true, isActive: true } },
+        councillor: { select: { id: true, firstName: true, lastName: true, isActive: true } },
         _count: {
           select: {
             complaints: true,
@@ -164,7 +178,7 @@ export const getWardPerformance = async (req: Request, res: Response, next: Next
       orderBy: { name: 'asc' },
     });
 
-    return sendSuccess(res, wards);
+    return sendSuccess(res, {wards});
   } catch (err) { next(err); }
 };
 

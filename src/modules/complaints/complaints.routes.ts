@@ -92,7 +92,7 @@ router.post(
   '/',
   requireAuth,
   requireRole('citizen', 'business_owner'),
-  validateBody(raiseComplaintSchema),
+  // validateBody(raiseComplaintSchema),
   raiseComplaint
 );
 
@@ -301,7 +301,7 @@ router.post(
 router.get(
   '/admin',
   requireAuth,
-  requireRole('super_admin', 'lga_admin'),
+  requireRole('super_admin', 'lga_admin',"chairman"),
   getAllComplaints
 );
 

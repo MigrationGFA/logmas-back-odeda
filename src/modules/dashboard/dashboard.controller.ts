@@ -5,10 +5,16 @@ import {
   ApplicationStatus,
   ComplaintStatus,
   User,
+  PaymentStatus,
+  PaymentMethod,
 } from "@prisma/client";
 import { prisma } from "../../utils/prisma";
 
-export const fetchMetricsByRole = async (role: Role, userId: string,user:User) => {
+export const fetchMetricsByRole = async (
+  role: Role,
+  userId: string,
+  user: User,
+) => {
   switch (role) {
     case Role.citizen: {
       // 1. Fetch data associated with the user as an applicant or owner
@@ -229,35 +235,45 @@ export const fetchMetricsByRole = async (role: Role, userId: string,user:User) =
       };
     }
     case Role.lga_admin:
-    case Role.chairman: {
-      // Management Cadre Overview (Whole LGA scope)
+    case Role.super_admin: {
+      // Platform-Wide Infrastructure Scope
       const [
-        revenueData,
-        totalActivePermits,
-        totalPendingInvoices,
-        totalWards,
+        totalLgas,
+        totalPlatformUsers,
+        totalSystemOfficers,
+        totalAuditEvents,
       ] = await Promise.all([
-        prisma.invoice.aggregate({
-          where: { status: InvoiceStatus.paid },
-          _sum: { amountPaid: true },
+        // Count all Local Government Areas configured on the platform
+        Promise.resolve(1),
+
+        // Count all registered accounts across all roles (Citizens, Businesses, Admins, etc.)
+        prisma.user.count({ where: { deletedAt: null } }),
+
+        // Count all operational collection workers on the ground
+        prisma.user.count({
+          where: {
+            role: {
+              in: [
+                "field_officer",
+                "treasurer",
+                "ward_councillor",
+                "contractor",
+              ],
+            },
+            deletedAt: null,
+          },
         }),
-        prisma.permit.count({
-          where: { status: PermitStatus.issued },
-        }),
-        prisma.invoice.count({
-          where: { status: InvoiceStatus.overdue },
-        }),
-        prisma.ward.count({
-          where: { deletedAt: null },
-        }),
+
+        // Count total recorded logs inside your security system audit tables
+        prisma.auditLog?.count() ?? Promise.resolve(0),
       ]);
 
       return {
         metrics: {
-          totalRevenue: Number(revenueData._sum.amountPaid || 0),
-          activePermits: totalActivePermits,
-          overdueInvoices: totalPendingInvoices,
-          wardCoverage: totalWards,
+          totalLgas,
+          platformUsers: totalPlatformUsers,
+          systemOfficers: totalSystemOfficers,
+          auditEvents: totalAuditEvents,
         },
       };
     }
@@ -459,6 +475,183 @@ export const fetchMetricsByRole = async (role: Role, userId: string,user:User) =
       };
     }
 
+    case Role.auditor: {
+      // 1. Execute concurrent data sweeps for all auditor metrics
+      const [
+        totalCollectedData,
+        outstandingData,
+        receiptsCount,
+        auditEventsCount,
+        issuedPermitsCount,
+        pendingPermitsCount,
+        activeOfficersCount,
+        paymentMethodsData,
+        orphanedInvoices,
+        topReceipts,
+        recentAudits,
+      ] = await Promise.all([
+        // Total Collected (Sum of amountPaid on paid invoices)
+        prisma.invoice.aggregate({
+          where: { status: InvoiceStatus.paid },
+          _sum: { amountPaid: true },
+        }),
+
+        // Outstanding (Sum of totalAmount on unpaid/overdue invoices)
+        prisma.invoice.aggregate({
+          where: {
+            status: { notIn: [InvoiceStatus.paid, InvoiceStatus.cancelled] },
+          },
+          _sum: { totalAmount: true },
+        }),
+
+        // Total Receipts Count
+        prisma.receipt.count(),
+
+        // Total Audit Events Count
+        prisma.auditLog.count(),
+
+        // Issued Permits Count
+        prisma.permit.count({ where: { status: PermitStatus.issued } }),
+
+        // Pending Permits Count
+        prisma.permit.count({
+          where: { status: PermitStatus.pending_payment },
+        }),
+
+        // Active Officers Count (field_officers + agents)
+        prisma.user.count({
+          where: {
+            role: { in: [Role.field_officer, Role.agent] },
+            isActive: true,
+            deletedAt: null,
+          },
+        }),
+
+        // Payment Methods Breakdown (Cash vs Digital)
+        // Note: Receipt model doesn't have paymentMethod, so we query the Payment table
+        prisma.payment.groupBy({
+          by: ["method"],
+          where: { status: PaymentStatus.confirmed },
+          _sum: { amount: true },
+        }),
+
+        // Anomalies: Invoices marked paid but have NO receipt (1:1 relation check)
+        prisma.invoice.findMany({
+          where: {
+            status: InvoiceStatus.paid,
+            receipt: null, // If receipt is null, it's an anomaly
+          },
+          take: 10, // Limit for the UI list
+          select: {
+            id: true,
+            invoiceNumber: true,
+            totalAmount: true,
+            business: { select: { businessName: true, ownerName: true } },
+          },
+        }),
+
+        // High-Value Transactions: Top 5 receipts by amount
+        prisma.receipt.findMany({
+          take: 5,
+          orderBy: { amountPaid: "desc" },
+          include: {
+            invoice: {
+              include: {
+                business: { select: { businessName: true, ownerName: true } },
+                category: { select: { name: true } },
+                payments: {
+                  take: 1,
+                  select: { method: true }, // Pull method from the payment record
+                },
+              },
+            },
+          },
+        }),
+
+        // Recent Audit Trail
+        prisma.auditLog.findMany({
+          take: 6,
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: {
+              select: { firstName: true, lastName: true, role: true },
+            },
+          },
+        }),
+      ]);
+
+      // 2. Process Payment Methods Breakdown (Cash vs Digital)
+      let cashCollected = 0;
+      let digitalCollected = 0;
+
+      paymentMethodsData.forEach((p) => {
+        const amount = Number(p._sum.amount || 0);
+        if (p.method === PaymentMethod.cash) {
+          cashCollected += amount;
+        } else {
+          digitalCollected += amount;
+        }
+      });
+
+      const totalCollected = Number(totalCollectedData._sum.amountPaid || 0);
+      const outstanding = Number(outstandingData._sum.totalAmount || 0);
+      const cashShare =
+        totalCollected > 0
+          ? Math.round((cashCollected / totalCollected) * 100)
+          : 0;
+
+      // 3. Format Anomalies (Orphaned Paid Invoices) -> Maps to UI's `orphanPaid`
+      const formattedOrphans = orphanedInvoices.map((inv) => ({
+        id: inv.id,
+        reference: inv.invoiceNumber,
+        customerName:
+          inv.business?.businessName || inv.business?.ownerName || "Unknown",
+        amount: Number(inv.totalAmount),
+      }));
+
+      // 4. Format High-Value Transactions (Top Receipts) -> Maps to UI's `largeReceipts`
+      const formattedTopReceipts = topReceipts.map((r) => ({
+        id: r.id,
+        receiptNumber: r.receiptNumber,
+        customerName:
+          r.invoice?.business?.businessName ||
+          r.invoice?.business?.ownerName ||
+          "Unknown",
+        levyType: r.invoice?.category?.name || "General",
+        paymentMethod: r.invoice?.payments?.[0]?.method || "unknown",
+        amount: Number(r.amountPaid),
+      }));
+
+      // 5. Format Recent Audit Trail -> Maps to UI's `audits`
+      const formattedAudits = recentAudits.map((a) => ({
+        id: a.id,
+        action: a.action,
+        target: a.entity || "System",
+        actor: a.user ? `${a.user.firstName} ${a.user.lastName}` : "System",
+        actorRole: a.user?.role || "system",
+        createdAt: a.createdAt.toISOString(),
+      }));
+
+      // 6. Dispatch payloads formatted specifically for the Auditor UI
+      return {
+        metrics: {
+          totalCollected,
+          outstanding,
+          receiptsAudited: receiptsCount,
+          auditEvents: auditEventsCount,
+          permitsIssued: issuedPermitsCount,
+          permitsPending: pendingPermitsCount,
+          cashShare,
+          activeOfficers: activeOfficersCount,
+          cashCollected,
+          digitalCollected,
+        },
+        anomalies: formattedOrphans, // Map this to `orphanPaid` in your frontend hook
+        highValueTransactions: formattedTopReceipts, // Map this to `largeReceipts` in your frontend hook
+        recentAudits: formattedAudits, // Map this to `audits` in your frontend hook
+      };
+    }
+
     default:
       return {
         message: "No specific metrics defined for this role.",
@@ -494,7 +687,7 @@ export const getDashboardOverview = async (
     }
 
     // Invoke our extracted service helper
-    const payload = await fetchMetricsByRole(role, userId,user);
+    const payload = await fetchMetricsByRole(role, userId, user);
 
     res.status(200).json({
       success: true,

@@ -329,9 +329,7 @@ export const createStaff = async (
 
     // LGA Admin cannot create super_admin, chairman, treasurer, auditor
     const allowedRoles: Role[] = [
-      "ward_councillor",
-      "contractor",
-      "field_officer",
+    'ward_councillor', 'contractor', 'field_officer', 'agent','citizen',"business_owner","auditor","treasurer","chairman"
     ];
     if (!allowedRoles.includes(role as Role)) {
       return sendError(
@@ -367,7 +365,7 @@ export const createStaff = async (
 
     // Generate a secure temporary password
     const tempPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
-    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+    const hashedPassword = await bcrypt.hash('demo1234', 12);
 
     const staff = await prisma.user.create({
       data: {

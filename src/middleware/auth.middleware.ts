@@ -12,6 +12,9 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
+
+    console.log('JWT_SECRET present:', !!process.env.JWT_SECRET); // ← add this
+    console.log('Token received:', token.substring(0, 20) + '...'); // ← add this
     
     req.user = {
       ...decoded,

@@ -27,7 +27,7 @@ export const queryString = (val: unknown): string | undefined => {
 export const raiseComplaint = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
-    const { title, description, wardId } = req.body;
+    const { title, description, wardId, category } = req.body;
 
     const ward = await prisma.ward.findUnique({ where: { id: wardId } });
     if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
@@ -36,10 +36,17 @@ export const raiseComplaint = async (req: Request, res: Response, next: NextFunc
       data: {
         ticketNumber: generateReceiptNumber('TKT'),
         title,
+        category,
         description,
-        wardId,
-        raisedById: userId,
         status: 'open',
+        
+        // 🚀 FIX: Connect using relationship mappings instead of hard keys
+        ward: {
+          connect: { id: wardId }
+        },
+        raisedBy: {
+          connect: { id: userId }
+        }
       },
       include: {
         ward: { select: { id: true, name: true } },

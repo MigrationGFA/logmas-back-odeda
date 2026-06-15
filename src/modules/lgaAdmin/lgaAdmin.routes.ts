@@ -8,6 +8,11 @@ import {
   assignCouncillor, deleteWard,
   createStaff, listStaff, getStaffById, updateStaff, toggleStaffStatus,
   getAdminOverview,
+  getAccountsOverview,
+  resetAccountPassword,
+  getContractorsOverview,
+  createContractor,
+  addAgentToContractor,
 } from './lgaAdmin.controller';
 import {
   createWardSchema, updateWardSchema, assignCouncillorSchema,
@@ -24,7 +29,7 @@ const guard = [requireAuth, requireRole('lga_admin', 'super_admin')];
 
 /**
  * @openapi
- * /lga-admin/overview:
+ * /lga/overview:
  *   get:
  *     tags: [LGA Admin]
  *     summary: Dashboard overview — ward, staff, application and complaint stats
@@ -37,7 +42,7 @@ router.get('/overview', ...guard, getAdminOverview);
 
 /**
  * @openapi
- * /lga-admin/wards:
+ * /lga/wards:
  *   post:
  *     tags: [LGA Admin]
  *     summary: Create a new ward
@@ -48,18 +53,18 @@ router.post('/wards', ...guard, validateBody(createWardSchema), createWard);
 
 /**
  * @openapi
- * /lga-admin/wards:
+ * /lga/wards:
  *   get:
  *     tags: [LGA Admin]
  *     summary: List all wards with councillor info and counts
  *     security:
  *       - BearerAuth: []
  */
-router.get('/wards', ...guard, validateQuery(listWardsSchema), listWards);
+router.get('/wards', ...guard, listWards);
 
 /**
  * @openapi
- * /lga-admin/wards/{id}:
+ * /lga/wards/{id}:
  *   get:
  *     tags: [LGA Admin]
  *     summary: Get a single ward with full detail
@@ -70,7 +75,7 @@ router.get('/wards/:id', ...guard, getWardById);
 
 /**
  * @openapi
- * /lga-admin/wards/{id}:
+ * /lga/wards/{id}:
  *   patch:
  *     tags: [LGA Admin]
  *     summary: Update ward details
@@ -81,7 +86,7 @@ router.patch('/wards/:id', ...guard, validateBody(updateWardSchema), updateWard)
 
 /**
  * @openapi
- * /lga-admin/wards/{id}/assign-councillor:
+ * /lga/wards/{id}/assign-councillor:
  *   patch:
  *     tags: [LGA Admin]
  *     summary: Assign a ward councillor to this ward
@@ -97,7 +102,7 @@ router.patch(
 
 /**
  * @openapi
- * /lga-admin/wards/{id}:
+ * /lga/wards/{id}:
  *   delete:
  *     tags: [LGA Admin]
  *     summary: Soft delete a ward
@@ -110,7 +115,7 @@ router.delete('/wards/:id', ...guard, deleteWard);
 
 /**
  * @openapi
- * /lga-admin/staff:
+ * /lga/staff:
  *   post:
  *     tags: [LGA Admin]
  *     summary: Create a new staff account with a generated temporary password
@@ -118,21 +123,41 @@ router.delete('/wards/:id', ...guard, deleteWard);
  *       - BearerAuth: []
  */
 router.post('/staff', ...guard, validateBody(createStaffSchema), createStaff);
+/**
+ * @openapi
+ * /lga/contractors:
+ *   post:
+ *     tags: [LGA Admin]
+ *     summary: Create a new Contractor account with a generated temporary password
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post('/contractors', ...guard,  createContractor);
+/**
+ * @openapi
+ * /lga/contractors/:contractorId/agents:
+ *   post:
+ *     tags: [LGA Admin]
+ *     summary: Create a new Contractor account with a generated temporary password
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post('/contractors/:contractorId/agents', ...guard,  addAgentToContractor);
 
 /**
  * @openapi
- * /lga-admin/staff:
+ * /lga/staff:
  *   get:
  *     tags: [LGA Admin]
  *     summary: List all staff — filterable by role, ward, and active status
  *     security:
  *       - BearerAuth: []
  */
-router.get('/staff', ...guard, validateQuery(listStaffSchema), listStaff);
+router.get('/staff', ...guard, listStaff);
 
 /**
  * @openapi
- * /lga-admin/staff/{id}:
+ * /lga/staff/{id}:
  *   get:
  *     tags: [LGA Admin]
  *     summary: Get a single staff member with full profile
@@ -143,7 +168,7 @@ router.get('/staff/:id', ...guard, getStaffById);
 
 /**
  * @openapi
- * /lga-admin/staff/{id}:
+ * /lga/staff/{id}:
  *   patch:
  *     tags: [LGA Admin]
  *     summary: Update staff profile or reassign ward/contractor
@@ -154,7 +179,7 @@ router.patch('/staff/:id', ...guard, validateBody(updateStaffSchema), updateStaf
 
 /**
  * @openapi
- * /lga-admin/staff/{id}/toggle-status:
+ * /lga/staff/{id}/toggle-status:
  *   patch:
  *     tags: [LGA Admin]
  *     summary: Activate or suspend a staff account
@@ -162,5 +187,37 @@ router.patch('/staff/:id', ...guard, validateBody(updateStaffSchema), updateStaf
  *       - BearerAuth: []
  */
 router.patch('/staff/:id/toggle-status', ...guard, toggleStaffStatus);
+
+/**
+ * @openapi
+ * /lga/accounts/overview:
+ *   patch:
+ *     tags: [LGA Admin]
+ *     summary: Get All Accounts Overview
+ *     security:
+ *       - BearerAuth: []
+ */
+router.get('/accounts/overview', ...guard, getAccountsOverview);
+/**
+ * @openapi
+ * /lga/contractors/overview:
+ *   patch:
+ *     tags: [LGA Admin]
+ *     summary: Get All Contractors Overview
+ *     security:
+ *       - BearerAuth: []
+ */
+router.get('/contractors/overview', ...guard, getContractorsOverview);
+
+/**
+ * @openapi
+ * /lga/accounts/:id/reset-password:
+ *   patch:
+ *     tags: [LGA Admin]
+ *     summary: Reset a Users password
+ *     security:
+ *       - BearerAuth: []
+ */
+router.patch('/accounts/:id/reset-password', ...guard, resetAccountPassword);
 
 export default router;

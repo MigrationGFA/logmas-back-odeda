@@ -13,6 +13,7 @@ import {
   getCouncillorQueue,
   decideonApplication,
   verifyCertificate,
+  getCertificateData,
 } from './stateOfOrigin.controller';
 import {
   submitApplicationSchema,
@@ -33,6 +34,7 @@ const router = Router();
 
 // ── PUBLIC (no auth) ─────────────────────────────────────────
 router.get('/verify/:code', verifyCertificate);
+router.get('/certificate/:applicationId', getCertificateData);
 
 // ── CITIZEN ──────────────────────────────────────────────────
 /**
@@ -119,7 +121,7 @@ router.get(
   '/admin',
   requireAuth,
   requireRole('lga_admin', 'super_admin'),
-  validateQuery(listApplicationsSchema),
+  // validateQuery(listApplicationsSchema),
   getAllApplications
 );
 router.get(

@@ -8,7 +8,7 @@ export const registerBusinessSchema = z.object({
   ownerName: z.string().min(2, 'Owner name is required'),
   address: z.string().min(5, 'Business address is required'),
   phone: z.string().min(10, 'Valid phone number is required'),
-  email: z.string().email().optional(),
+  email: z.string().optional(),
   cacNumber: z.string().optional(),
   category: z.string().min(2, 'Business category is required'),
   description: z.string().optional(),
@@ -18,26 +18,35 @@ export const registerBusinessSchema = z.object({
 // ── Invoice Generation ────────────────────────────────────────
 
 export const generateInvoiceSchema = z.object({
-  businessId: z.string().uuid('Invalid business ID'),
-  category: z.enum([
-    'trade_permit',
-    'market_levy',
-    'environmental_levy',
-    'signage',
-    'parking_levy',
-    'haulage_levy',
-    'lockup_store_levy',
-    'business_levy',
-    'event_permit',
-    'state_of_origin_fee',
-    'other',
-  ]),
+  // ── 1. Business Details ──────────────────────────────────────
+  // Either provide an existing businessId OR the details to create a new one
+  businessId: z.string().uuid('Invalid business ID').optional(),
+  
+  // New business fields (Conditionally required if businessId is omitted)
+  businessName: z.string().min(1, 'Business name is required').optional(),
+  ownerName: z.string().min(1, 'Owner name is required').optional(),
+  phone: z.string().min(1, 'Phone number is required').optional(),
+  wardId: z.string().uuid('Invalid ward ID').optional(),
+  
+  // Optional new business fields
+  email: z.string().email('Invalid email format').optional().or(z.literal('')),
+  address: z.string().optional(),
+  category: z.string().optional(), // Maps to `businessCategory` in the controller
+
+  // ── 2. Invoice Details ───────────────────────────────────────
+  categoryId: z.string().uuid('Invalid revenue category ID'),
+  levyConfigId: z.string().uuid('Invalid levy config ID').optional(),
   description: z.string().optional(),
+  
+  // ── 3. Pricing & Quantity ────────────────────────────────────
   // Officer can override amount if no levy config exists
-  // Treasurer config takes precedence if present
-  overrideAmount: z.number().positive().optional(),
-  quantity: z.number().int().positive().default(1),
-});
+  overrideAmount: z.number().positive('Override amount must be a positive number').optional(),
+  quantity: z.number().int().positive('Quantity must be a positive integer').default(1),
+  
+  // ── 4. Due Date ──────────────────────────────────────────────
+  dueDate: z.union([z.string(), z.date()]).optional(),
+
+})
 
 // ── Payment Recording ─────────────────────────────────────────
 

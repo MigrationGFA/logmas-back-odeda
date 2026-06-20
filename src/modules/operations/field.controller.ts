@@ -389,42 +389,27 @@ export const generateInvoice = async (
  * On full payment → receipt is auto-generated immediately.
  * On partial payment → invoice status set to partially_paid.
  */
-export const recordPayment = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+export const recordPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const officerId = req.user!.id;
     const { invoiceId, amount, method, reference, narration } = req.body;
 
+    // 1. Fetch invoice and include the linked permit structure safely
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: {
         business: { select: { id: true, businessName: true, ownerName: true } },
+        permit: { select: { id: true, status: true } }, // 🚀 Include connected permit array
       },
     });
 
-    if (!invoice)
-      return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
+    if (!invoice) return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
 
     if (invoice.status === "paid") {
-      return sendError(
-        res,
-        "This invoice has already been paid",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
+      return sendError(res, "This invoice has already been paid", "BAD_REQUEST", null, 400);
     }
     if (invoice.status === "cancelled") {
-      return sendError(
-        res,
-        "Cannot record payment on a cancelled invoice",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
+      return sendError(res, "Cannot record payment on a cancelled invoice", "BAD_REQUEST", null, 400);
     }
 
     const paymentAmount = Number(amount);
@@ -436,7 +421,7 @@ export const recordPayment = async (
         `Payment amount (${paymentAmount}) exceeds balance due (${balanceDue})`,
         "BAD_REQUEST",
         null,
-        400,
+        400
       );
     }
 
@@ -444,8 +429,9 @@ export const recordPayment = async (
     const newAmountPaid = Number(invoice.amountPaid) + paymentAmount;
     const newBalanceDue = balanceDue - paymentAmount;
 
+    // 2. RUN ATOMIC TRANSACTION MATRIX
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Record payment
+      // A. Write payment ledger entry
       const payment = await tx.payment.create({
         data: {
           invoiceId,
@@ -460,7 +446,7 @@ export const recordPayment = async (
         },
       });
 
-      // 2. Update invoice totals and status
+      // B. Update invoice structural stats
       const updatedInvoice = await tx.invoice.update({
         where: { id: invoiceId },
         data: {
@@ -471,9 +457,12 @@ export const recordPayment = async (
         },
       });
 
-      // 3. Auto-generate receipt on full payment
       let receipt = null;
+      let updatedPermit = null;
+
+      // C. Full payment settlement block
       if (isFullPayment) {
+        // Generate the official receipt securely
         receipt = await tx.receipt.create({
           data: {
             receiptNumber: generateReceiptNumber("RCP"),
@@ -484,24 +473,30 @@ export const recordPayment = async (
             issuedById: officerId,
           },
         });
+
+        // 🚀 D. Auto-Issue the linked trade permit instantly
+        const targetPermit = invoice.permit?.[0]; // Grab the first linked permit draft
+        if (targetPermit) {
+          updatedPermit = await tx.permit.update({
+            where: { id: targetPermit.id },
+            data: {
+              status: 'issued', // ◄ Mutate status from pending_payment to active issuance!
+            },
+          });
+        }
       }
 
-      return { payment, invoice: updatedInvoice, receipt };
+      return { payment, invoice: updatedInvoice, receipt, permit: updatedPermit };
     });
 
+    // 3. Post-Transaction Audit Trails
     await prisma.auditLog.create({
       data: {
         action: "payment_confirmed",
         entity: "Payment",
         entityId: result.payment.id,
         userId: officerId,
-        details: {
-          invoiceId,
-          amount: paymentAmount,
-          method,
-          isFullPayment,
-          receiptId: result.receipt?.id ?? null,
-        },
+        details: { invoiceId, amount: paymentAmount, method, isFullPayment, receiptId: result.receipt?.id ?? null },
         ipAddress: getIp(req),
       },
     });
@@ -519,7 +514,21 @@ export const recordPayment = async (
       });
     }
 
-    // TODO Phase 7: Send SMS/WhatsApp receipt to business owner
+    // Trace the permit issuance change in system logs
+    if (result.permit) {
+      await prisma.auditLog.create({
+        data: {
+          action: "permit_issued",
+          entity: "Permit",
+          entityId: result.permit.id,
+          userId: officerId,
+          details: { permitId: result.permit.id, status: result.permit.status },
+          ipAddress: getIp(req),
+        },
+      });
+    }
+
+    // TODO Phase 7: Send SMS/WhatsApp receipt/QR payload links to business owner
 
     return sendSuccess(
       res,
@@ -527,13 +536,12 @@ export const recordPayment = async (
         payment: result.payment,
         invoice: result.invoice,
         receipt: result.receipt,
+        permit: result.permit, // Return updated object back down to frontend
         message: isFullPayment
-          ? "Full payment recorded. Receipt generated."
+          ? "Full payment recorded. Receipt generated and Trade Permit issued immediately."
           : `Partial payment recorded. Balance due: ₦${newBalanceDue}`,
       },
-      isFullPayment
-        ? "Payment confirmed and receipt issued"
-        : "Partial payment recorded",
+      isFullPayment ? "Payment confirmed and permit officially issued" : "Partial payment recorded"
     );
   } catch (err) {
     next(err);
@@ -614,7 +622,7 @@ export const issuePermit = async (
         qrToken: generateQrToken(),
         status: "issued",
         // permitType,
-        categoryId,
+        category: { connect: { id: categoryId } },
         validFrom: startDate,
         validTo: endDate,
         businessId,
@@ -658,6 +666,281 @@ export const issuePermit = async (
     next(err);
   }
 };
+
+/**
+ * GET /api/v1/operations/field/permits
+ * Field officer views permits in their assigned ward.
+ * Scoped strictly to wardId on their user record.
+ */
+export const getWardPermits = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const officerId = req.user!.id;
+    const search    = queryString(req.query.search);
+    const status    = queryString(req.query.status);
+
+    // Get officer's assigned ward
+    const officer = await prisma.user.findUnique({
+      where: { id: officerId },
+      // select: { wardId: true },
+      include:{ward:true}
+    });
+
+    if (!officer?.ward.id) {
+      return sendError(res, 'No ward assigned to your account', 'BAD_REQUEST', null, 400);
+    }
+
+    const where: any = {
+      business: { wardId: officer?.ward.id },
+    };
+
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { business: { businessName: { contains: search, mode: 'insensitive' } } },
+        { business: { ownerName:    { contains: search, mode: 'insensitive' } } },
+        { permitNumber: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [permits, dailyCollections, inspectedCount] = await Promise.all([
+
+      prisma.permit.findMany({
+        where,
+        include: {
+          business: {
+            select: {
+              id: true, businessName: true, ownerName: true,
+              phone: true, address: true, category: true,
+            },
+          },
+          invoice: {
+            select: { id: true, invoiceNumber: true, status: true, balanceDue: true, totalAmount: true },
+          },
+          config: { select: { baseAmount: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+
+      // Daily collections — payments confirmed today by this officer
+      prisma.payment.aggregate({
+        where: {
+          confirmedById: officerId,
+          status: 'confirmed',
+          createdAt: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+          },
+        },
+        _sum: { amount: true },
+      }),
+
+      // Inspected shops — invoices this officer created
+      prisma.invoice.count({
+        where: {
+          assignedOfficerId: officerId,
+          business: { wardId: officer?.ward.id },
+        },
+      }),
+    ]);
+
+    // Shape to match UI fields exactly
+    const shaped = permits.map((p) => {
+      const isSettled  = ['issued'].includes(p.status);
+      const outstanding = isSettled
+        ? 0
+        : Number(p.invoice?.balanceDue ?? p.config?.baseAmount ?? 0);
+
+      return {
+        id:           p.id,
+        permitNumber: p.permitNumber,
+        status:       p.status,
+        validFrom:    p.validFrom,
+        validTo:      p.validTo,
+        outstanding,
+        // Business info — UI reads these directly
+        businessName: p.business.businessName,
+        ownerName:    p.business.ownerName,
+        phone:        p.business.phone,
+        address:      p.business.address,
+        category:     p.business.category,
+        businessId:   p.business.id,
+        // Invoice for pay now link
+        invoiceId:        p.invoice?.id ?? null,
+        invoiceNumber:    p.invoice?.invoiceNumber ?? null,
+        invoiceStatus:    p.invoice?.status ?? null,
+        // Config
+        fee:          Number(p.config?.baseAmount ?? 0),
+        permitType:   p.config?.name ?? '—',
+      };
+    });
+
+    return sendSuccess(res, {
+      permits: shaped,
+      stats: {
+        dailyCollections: Number(dailyCollections._sum.amount ?? 0),
+        inspectedShops:   inspectedCount,
+        wardId:           officer.ward.id,
+        wardName: officer.ward.name
+      },
+    });
+  } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/v1/operations/field/permits/:permitId/demand-notice
+ * Field officer issues a demand notice (invoice) for an unpaid permit.
+ * Only allowed if permit has no active unpaid invoice.
+ */
+export const issueDemandNotice = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { permitId } = req.params;
+    const officerId    = req.user!.id;
+
+    const permit = await prisma.permit.findUnique({
+      where: { id: String(permitId) },
+      include: {
+        business: { select: { id: true, businessName: true, wardId: true } },
+        invoice:  { select: { id: true, status: true } },
+        config:   { select: { baseAmount: true, categoryId: true } },
+      },
+    });
+
+    if (!permit) return sendError(res, 'Permit not found', 'NOT_FOUND', null, 404);
+
+    // Verify officer is in the same ward
+    const officer = await prisma.user.findUnique({
+      where: { id: officerId },
+      select: { wardId: true },
+    });
+
+    if (officer?.wardId !== permit.business.wardId) {
+      return sendError(res, 'This permit is not in your assigned ward', 'FORBIDDEN', null, 403);
+    }
+
+    if (permit.status === 'issued') {
+      return sendError(res, 'Permit is already active — no demand notice needed', 'BAD_REQUEST', null, 400);
+    }
+
+    // Block if already has an unpaid invoice
+    if (permit.invoice && ['sent', 'partially_paid', 'overdue'].includes(permit.invoice.status)) {
+      return sendError(
+        res,
+        'An unpaid invoice already exists for this permit',
+        'CONFLICT',
+        null,
+        409
+      );
+    }
+
+    const amount = Number(permit.config?.baseAmount ?? 0);
+    if (amount === 0) {
+      return sendError(res, 'No pricing configured for this permit type', 'BAD_REQUEST', null, 400);
+    }
+
+    // Create invoice
+    const invoice = await prisma.invoice.create({
+      data: {
+        categoryId:        permit.config!.categoryId,
+        description:       `Demand Notice — ${permit.business.businessName} — ${permit.permitNumber}`,
+        subtotal:          amount,
+        totalAmount:       amount,
+        balanceDue:        amount,
+        status:            'sent',
+        createdById:       officerId,
+        assignedOfficerId: officerId,
+        businessId:        permit.business.id,
+        dueDate:           new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    // Link invoice to permit
+    await prisma.permit.update({
+      where: { id: String(permitId) },
+      data:  { invoiceId: invoice.id },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action:   'invoice_created',
+        entity:   'Invoice',
+        entityId: invoice.id,
+        userId:   officerId,
+        details:  { type: 'demand_notice', permitId, businessId: permit.business.id },
+        ipAddress: getIp(req),
+      },
+    });
+
+    return sendSuccess(res, { invoice, permit: permitId }, 'Demand notice issued', 201);
+  } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/v1/operations/field/violations
+ * Field officer logs a business violation or unregistered business.
+ */
+export const logViolation = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const officerId = req.user!.id;
+    const {
+      businessId,    // optional — if business already registered
+      businessName,  // required if businessId not provided
+      address,       // required if businessId not provided
+      wardId,
+      description,
+      severity = 'minor',
+    } = req.body;
+
+    if (!description) {
+      return sendError(res, 'Description is required', 'BAD_REQUEST', null, 400);
+    }
+
+    if (!businessId && !businessName) {
+      return sendError(res, 'Either businessId or businessName is required', 'BAD_REQUEST', null, 400);
+    }
+
+    // Verify ward
+    const ward = await prisma.ward.findUnique({ where: { id: wardId } });
+    if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
+
+    // If businessId provided, verify it exists
+    if (businessId) {
+      const biz = await prisma.business.findUnique({ where: { id: businessId } });
+      if (!biz) return sendError(res, 'Business not found', 'NOT_FOUND', null, 404);
+    }
+
+    const violation = await prisma.violation.create({
+      data: {
+        businessId:   businessId ?? null,
+        businessName: businessId ? null : businessName,
+        address:      businessId ? null : address,
+        wardId,
+        description,
+        severity,
+        status:      'open',
+        loggedById:  officerId,
+      },
+      include: {
+        business: { select: { businessName: true, address: true } },
+        ward:     { select: { name: true } },
+        loggedBy: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action:   'complaint_raised', // closest existing action
+        entity:   'Violation',
+        entityId: violation.id,
+        userId:   officerId,
+        details:  { severity, businessName: businessId ? violation.business?.businessName : businessName },
+        ipAddress: getIp(req),
+      },
+    });
+
+    return sendSuccess(res, violation, 'Violation logged successfully', 201);
+  } catch (err) { next(err); }
+};
+
+
 
 // ─────────────────────────────────────────────────────────────
 // RECEIPT VERIFICATION

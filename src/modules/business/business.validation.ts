@@ -6,7 +6,7 @@ export const createBusinessSchema = z.object({
   ownerName: z.string().min(2, 'Owner name is required'),
   address: z.string().min(5, 'Business address is required'),
   phone: z.string().min(10, 'Valid phone number is required'),
-  email: z.string().email().optional(),
+  email: z.string().email(),
   cacNumber: z.string().optional(),
   category: z.string().min(2, 'Business category is required'),
   description: z.string().optional(),
@@ -28,19 +28,8 @@ export const updateBusinessSchema = z.object({
 
 export const applyPermitSchema = z.object({
   businessId: z.string().uuid('Invalid business ID'),
-  permitType: z.string().min(2, 'Permit type is required'),
-  category: z.enum([
-    'trade_permit',
-    'market_levy',
-    'environmental_levy',
-    'signage',
-    'parking_levy',
-    'haulage_levy',
-    'lockup_store_levy',
-    'business_levy',
-    'event_permit',
-    'other',
-  ]),
+  // permitType: z.string().min(2, 'Permit type is required'),
+  categoryId: z.string(),
   validFrom: z.string().refine((v) => !isNaN(Date.parse(v)), { message: 'Invalid date' }).optional(),
 });
 

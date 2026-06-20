@@ -17,6 +17,7 @@ interface GetInvoicesQuery {
   search?: string;
 }
 
+
 export const fetchInvoicesHubData = async ({
   role,
   userId,
@@ -29,7 +30,17 @@ export const fetchInvoicesHubData = async ({
   if (role === Role.citizen || role === Role.business_owner) {
     baseWhere.OR = [{ createdById: userId }, { business: { ownerId: userId } }];
   } else if (role === Role.field_officer) {
-    baseWhere.createdById = userId;
+    // 🚨 FIELD OFFICER VISIBILITY: They should see invoices THEY raised 
+    // OR any invoice tied to a business located in their assigned territory/ward
+    const officer = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { wardId: true },
+    });
+    
+    baseWhere.OR = [
+      { createdById: userId },
+      ...(officer?.wardId ? [{ business: { wardId: officer.wardId } }] : [])
+    ];
   } else if (role === Role.contractor) {
     baseWhere.createdBy = { contractorId: userId };
   } else if (role === Role.ward_councillor) {
@@ -42,25 +53,21 @@ export const fetchInvoicesHubData = async ({
     }
   }
 
-  // 2. Fetch Aggregates for the 4 Stat Cards (Unfiltered by search or tab)
-  // Ensure your aggregate card states exclude paid/cancelled options safely
+  // 2. Fetch Aggregates for the 4 Stat Cards
   const [totalsAggregate, paidReceiptsCount] = await Promise.all([
     prisma.invoice.aggregate({
       where: {
         ...baseWhere,
-        // Exclude drafts or cancelled bills if they shouldn't skew metrics
         status: {
           notIn: [InvoiceStatus.draft, InvoiceStatus.cancelled],
         },
       },
       _sum: {
         totalAmount: true,
-        amountPaid: true,  // ✅ Now accurately captures 100% of collected revenue
-        balanceDue: true,  // ✅ Captures what is left over from unpaid/partially paid bills
+        amountPaid: true,
+        balanceDue: true,
       },
-      _count: { id: true },
     }),
-
     prisma.receipt.count({
       where: { invoice: baseWhere },
     }),
@@ -68,78 +75,102 @@ export const fetchInvoicesHubData = async ({
 
   const totalCollected = Number(totalsAggregate._sum.amountPaid || 0);
   const outstandingAmount = Number(totalsAggregate._sum.balanceDue || 0);
-  const avgPayment =
-    paidReceiptsCount > 0 ? Math.round(totalCollected / paidReceiptsCount) : 0;
+  const avgPayment = paidReceiptsCount > 0 ? Math.round(totalCollected / paidReceiptsCount) : 0;
 
-  // 3. Inject Search and Tab Filter Criteria for the main table ledger
+  // 3. Inject Search and Tab Filter Criteria
   const listWhere: Prisma.InvoiceWhereInput = { ...baseWhere };
 
   if (tab && tab !== "all") {
     if (tab === "unpaid") {
-      // If the user selects the "Unpaid" tab, check for statuses representing money owed
       listWhere.status = {
         in: [InvoiceStatus.sent, InvoiceStatus.partially_paid],
       };
     } else {
-      // Otherwise map directly to standard enums like paid, overdue, draft, cancelled
       listWhere.status = tab as InvoiceStatus;
     }
   }
+
   if (search) {
     listWhere.AND = [
-      { OR: baseWhere.OR ? baseWhere.OR : [] }, // keep ownership filter
+      { OR: baseWhere.OR ? baseWhere.OR : [] },
       {
         OR: [
           { invoiceNumber: { contains: search, mode: "insensitive" } },
           { description: { contains: search, mode: "insensitive" } },
-          {
-            business: {
-              businessName: { contains: search, mode: "insensitive" },
-            },
-          },
-          {
-            createdBy: { firstName: { contains: search, mode: "insensitive" } },
-          },
-          {
-            createdBy: { lastName: { contains: search, mode: "insensitive" } },
-          },
+          { business: { businessName: { contains: search, mode: "insensitive" } } },
+          { createdBy: { firstName: { contains: search, mode: "insensitive" } } },
+          { createdBy: { lastName: { contains: search, mode: "insensitive" } } },
         ],
       },
     ];
-    delete listWhere.OR; // remove the top-level OR to avoid conflict
+    delete listWhere.OR;
   }
-  // 4. Fetch Ledger Data rows including immediate nested receipt references
+
+  // 4. Fetch Ledger Data with cross-model relations to derive types
   const invoices = await prisma.invoice.findMany({
     where: listWhere,
     include: {
-      receipt: {
-        select: { id: true, receiptNumber: true },
+      receipt: { select: { id: true, receiptNumber: true } },
+      business: { select: { businessName: true, address: true } },
+      createdBy: { select: { firstName: true, lastName: true } },
+      category: { select: { name: true, type: true } },
+      
+      // 🚀 Eager load structural cross-references to identify origin types
+      stateOfOriginApplication: {
+        include: {
+          applicant: { select: { firstName: true, lastName: true } }
+        }
       },
-      business: {
-        select: { businessName: true, category: true },
-      },
-      createdBy: {
-        // ← add this
-        select: { firstName: true, lastName: true },
-      },
-      category: true,
+      permit: {
+        include: {
+          config: { select: { name: true } }
+        }
+      }
     },
     orderBy: { createdAt: "desc" },
   });
 
-  // 5. Map rows to align explicitly with frontend data names
-  const formattedInvoices = invoices.map((inv) => ({
-    id: inv.id,
-    reference: inv.invoiceNumber,
-    customerName:
-      inv.business?.businessName ??
-      `${inv.createdBy.firstName} ${inv.createdBy.lastName}`,
-    levyType: inv.category.name,
-    dueDate: inv.dueDate ? inv.dueDate.toISOString().split("T")[0] : "N/A",
-    amount: Number(inv.totalAmount),
-    status: inv.status,
-    receiptId: inv.receipt?.id || null,
-  }));
+  // 5. Transform & Map rows to inject DERIVED type metadata
+  const formattedInvoices = invoices.map((inv) => {
+    let invoiceType: 'SOO' | 'PERMIT' | 'LEVY' = 'LEVY';
+    let labelDescription = inv.category?.name || "General Revenue Levy";
+    let customerName = "Walk-in Citizen";
+
+    // Scenario A: It's an Identity Document application
+    if (inv.stateOfOriginApplication) {
+      invoiceType = 'SOO';
+      labelDescription = "State of Origin Certificate Fee";
+      const applicant = inv.stateOfOriginApplication.applicant;
+      if (applicant) customerName = `${applicant.firstName} ${applicant.lastName}`;
+    } 
+    // Scenario B: It's a Trade/Business compliance license
+    else if (inv.permit) {
+      invoiceType = 'PERMIT';
+      labelDescription = inv.permit.config?.name || "Business Operational Permit";
+      if (inv.business) customerName = inv.business.businessName;
+    } 
+    // Scenario C: Traditional pure levy/tax collection
+    else {
+      invoiceType = 'LEVY';
+      if (inv.business) {
+        customerName = inv.business.businessName;
+      } else if (inv.createdBy) {
+        customerName = `${inv.createdBy.firstName} ${inv.createdBy.lastName}`;
+      }
+    }
+
+    return {
+      id: inv.id,
+      reference: inv.invoiceNumber,
+      customerName: customerName.toUpperCase(),
+      levyType: labelDescription, // Sent to Lovable's category display column
+      invoiceType,                 // 🚀 UI can color-code badges based on this!
+      dueDate: inv.dueDate ? inv.dueDate.toISOString().split("T")[0] : "N/A",
+      amount: Number(inv.totalAmount),
+      status: inv.status,
+      receiptId: inv.receipt?.id || null,
+    };
+  });
 
   return {
     stats: {
@@ -509,9 +540,9 @@ export const simulatePayment = async (
 
     const invoice = await prisma.invoice.findUnique({
       where: { invoiceNumber: String(id) },
-      include:{
-        stateOfOriginApplication:true
-      }
+      include: {
+        stateOfOriginApplication: true,
+      },
     });
     if (!invoice)
       return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
@@ -557,13 +588,13 @@ export const simulatePayment = async (
       });
 
       if (invoice.stateOfOriginApplication) {
-         await tx.stateOfOriginApplication.update({
+        await tx.stateOfOriginApplication.update({
           where: { id: invoice.stateOfOriginApplication.id },
           data: {
             // Adjust 'paid' or 'pending_approval' based on your exact enum setup
-            status: "paid", 
+            status: "paid",
             // paymentConfirmedAt: new Date()
-          }
+          },
         });
       }
 

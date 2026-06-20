@@ -195,7 +195,7 @@ export const getAllApplications = async (req: Request, res: Response, next: Next
           applicant: { select: { id: true, firstName: true, lastName: true, email: true } },
           ward: { select: { id: true, name: true, code: true } },
           invoice: { select: { id: true, status: true, totalAmount: true } },
-          certificate: { select: { id: true, certificateNumber: true } },
+          certificate: { select: { id: true, certificateNumber: true,issuedAt:true } },
         },
         orderBy: { createdAt: 'desc' },
       }),

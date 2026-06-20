@@ -7,8 +7,10 @@ import {
   generateVerificationCode,
   generateQrToken,
 } from '../../utils/generators';
-import { InvoiceStatus, RevenueCategory } from '@prisma/client';
+import { InvoiceStatus, RevenueCategory, Role } from '@prisma/client';
 import { getIp, queryString } from '../complaints/complaints.controller';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 // ─────────────────────────────────────────────────────────────
 // BUSINESS PROFILE
@@ -21,44 +23,149 @@ import { getIp, queryString } from '../complaints/complaints.controller';
  */
 export const createBusiness = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = req.user!.id;
-    const { businessName, ownerName, address, phone, email, cacNumber, category, description, wardId } = req.body;
+    const actorId   = req.user!.id;
+    const actorRole = req.user!.role;
 
-    // One active business per owner
-    const existing = await prisma.business.findFirst({
-      where: { ownerId, isActive: true },
-    });
-    if (existing) {
-      return sendError(
-        res,
-        'You already have an active registered business. Update it instead.',
-        'CONFLICT',
-        null,
-        409
-      );
-    }
+    const {
+      businessName, ownerName, address, phone,
+      email, cacNumber, category, description, wardId,
+      ownerPhone,    
+      email:ownerEmail,
+      existingUserId, 
+    } = req.body;
 
+    // 1. Structural Validation up front
     const ward = await prisma.ward.findUnique({ where: { id: wardId } });
     if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
 
+    let targetOwnerId: string;
+
+    // ─────────────────────────────────────────────────────
+    // CITIZEN / BUSINESS OWNER — self-registration
+    // ─────────────────────────────────────────────────────
+    if (actorRole === Role.citizen || actorRole === Role.business_owner) {
+      const existing = await prisma.business.findFirst({
+        where: { ownerId: actorId, isActive: true },
+      });
+      if (existing) {
+        return sendError(res, 'You already have an active business profile registered.', 'CONFLICT', null, 409);
+      }
+      targetOwnerId = actorId;
+    } 
+    // ─────────────────────────────────────────────────────
+    // FIELD ENFORCEMENT & ADMINISTRATIVE HUB ONBOARDING
+    // ─────────────────────────────────────────────────────
+    else if (actorRole === Role.field_officer || actorRole === Role.super_admin || actorRole === Role.lga_admin) {
+      
+      if (existingUserId) {
+        const existingUser = await prisma.user.findUnique({
+          where: { id: existingUserId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!existingUser) {
+          return sendError(res, 'Specified user account not found in system registers', 'NOT_FOUND', null, 404);
+        }
+        targetOwnerId = existingUserId;
+      } else {
+        // Enforce fallback boundaries for walk-in cash-paying merchants
+        const contactPhone = ownerPhone || phone;
+        const contactName  = ownerName;
+
+        if (!contactName || !contactPhone) {
+          return sendError(
+            res,
+            'Owner name and phone number are required to register an unauthenticated street merchant',
+            'BAD_REQUEST',
+            null,
+            400
+          );
+        }
+
+        // Clean name parsing safely
+        const nameParts = contactName.trim().split(/\s+/);
+        const firstName = nameParts[0];
+        const lastName  = nameParts.slice(1).join(' ') || 'Walk-In';
+
+        // 🚀 EXECUTE ATOMIC TRANSIT TRANSACTION
+        // This ensures lookup-or-create runs smoothly without race condition crashes
+        const finalOwner = await prisma.$transaction(async (tx) => {
+          const existingByPhone = await tx.user.findFirst({
+            where: { phone: contactPhone },
+            select: { id: true }
+          });
+
+          if (existingByPhone) {
+            return existingByPhone;
+          }
+
+          // Build locked-down user object mapping tree
+          const secureTempPassword = await bcrypt.hash(crypto.randomUUID(), 12);
+          
+          return await tx.user.create({
+            data: {
+              firstName,
+              lastName,
+              phone: contactPhone,
+              email: ownerEmail || null,
+              password: secureTempPassword,
+              role: Role.citizen,
+              isWalkIn: true,
+              walkInRegisteredById: actorId,
+              wardId,
+            },
+          });
+        });
+
+        targetOwnerId = finalOwner.id;
+      }
+    } else {
+      return sendError(res, 'Your role is unauthorized to register operational properties', 'FORBIDDEN', null, 403);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // WRITE INTEGRATED BUSINESS BLOCK ATOMICALLY
+    // ─────────────────────────────────────────────────────
     const business = await prisma.business.create({
-      data: { businessName, ownerName, address, phone, email, cacNumber, category, description, wardId, ownerId },
-      include: { ward: { select: { id: true, name: true } } },
+      data: {
+        businessName,
+        ownerName,
+        address,
+        phone,
+        email,
+        cacNumber,
+        category,
+        description,
+        wardId,
+        ownerId: targetOwnerId,
+      },
+      include: {
+        ward:  { select: { id: true, name: true } },
+        owner: { select: { id: true, firstName: true, lastName: true, phone: true, isWalkIn: true } },
+      },
     });
 
+    // Log the transaction track
     await prisma.auditLog.create({
       data: {
-        action: 'user_created', // closest available — business registration
+        action: 'user_created',
         entity: 'Business',
         entityId: business.id,
-        userId: ownerId,
-        details: { businessName, category },
+        userId: actorId,
+        details: {
+          businessName,
+          category,
+          registeredByRole: actorRole,
+          targetOwnerId,
+          isWalkIn: business.owner.isWalkIn,
+        },
         ipAddress: getIp(req),
       },
     });
 
-    return sendSuccess(res, business, 'Business registered successfully', 201);
-  } catch (err) { next(err); }
+    return sendSuccess(res, business, 'Business entity registered successfully onto local registers', 201);
+  } catch (err) { 
+    next(err); 
+  }
 };
 
 /**
@@ -139,32 +246,43 @@ export const updateMyBusiness = async (req: Request, res: Response, next: NextFu
  * Creates permit (pending_payment) + invoice atomically.
  * Virtual account generation stubbed — wired in Phase 7.
  */
+
 export const applyForPermit = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = req.user!.id;
-    const { businessId, configId, validFrom } = req.body;
+    const actorId = req.user!.id;
+    const actorRole = req.user!.role;
+    const { businessId, categoryId, validFrom } = req.body;
 
     // 1. Fetch the exact permit configuration created by the Treasurer
-    const permitConfig = await prisma.permitConfig.findUnique({
-      where: { id: configId, isActive: true }
+    const permitConfig = await prisma.permitConfig.findFirst({
+      where: { categoryId: categoryId, isActive: true }
     });
     if (!permitConfig) {
       return sendError(res, 'Active permit configuration profile not found', 'NOT_FOUND', null, 404);
     }
 
-    // 2. Ownership check
-    const business = await prisma.business.findFirst({
-      where: { id: businessId, ownerId, isActive: true },
-    });
+    // 2. Dynamic Business Ownership & Existence Check
+    const businessWhere: any = { id: businessId, isActive: true };
+    
+    // Strict ownership boundary only for standard citizens/owners
+    if (actorRole === Role.citizen || actorRole === Role.business_owner) {
+      businessWhere.ownerId = actorId;
+    }
+
+    const business = await prisma.business.findFirst({ where: businessWhere });
+    
     if (!business) {
-      return sendError(res, 'Business not found or does not belong to you', 'FORBIDDEN', null, 403);
+      const errorMsg = (actorRole === Role.citizen || actorRole === Role.business_owner)
+        ? 'Business not found or does not belong to you'
+        : 'Target business profile not found or is currently inactive';
+      return sendError(res, errorMsg, 'FORBIDDEN', null, 403);
     }
 
     // 3. Block duplicates using the dynamic config tracker
     const activePermit = await prisma.permit.findFirst({
       where: {
         businessId,
-        configId,
+        configId: permitConfig.id,
         status: { in: ['pending_payment', 'issued'] },
       },
     });
@@ -174,27 +292,26 @@ export const applyForPermit = async (req: Request, res: Response, next: NextFunc
 
     const totalAmount = Number(permitConfig.baseAmount);
     const startDate = validFrom ? new Date(validFrom) : new Date();
-    
-    // Fall back to 'yearly' structural logic for permit lifespans
     const endDate = getPermitEndDate(startDate, 'yearly');
 
+    // 4. Atomic Database Writes
     const result = await prisma.$transaction(async (tx) => {
-      // Create billing reference
+      // Create billing reference (createdById tracks the active officer or citizen)
       const invoice = await tx.invoice.create({
         data: {
-          category: permitConfig.category,
+          categoryId: permitConfig.categoryId,
           description: `${permitConfig.name} — ${business.businessName}`,
           subtotal: totalAmount,
           totalAmount,
           balanceDue: totalAmount,
           status: 'sent',
-          createdById: ownerId,
+          createdById: actorId, 
           businessId,
           dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
 
-      // Create permit linking directly to configuration metadata
+      // Create permit document framework link
       const permit = await tx.permit.create({
         data: {
           permitNumber: generateReceiptNumber('PRM'),
@@ -202,11 +319,11 @@ export const applyForPermit = async (req: Request, res: Response, next: NextFunc
           qrToken: generateQrToken(),
           status: 'pending_payment',
           configId: permitConfig.id,
-          category: permitConfig.category,
+          categoryId: permitConfig.categoryId,
           validFrom: startDate,
           validTo: endDate,
           businessId,
-          issuedById: ownerId,
+          issuedById: actorId, // Tracks which officer handed it out on the field
           invoiceId: invoice.id,
         },
       });
@@ -214,19 +331,31 @@ export const applyForPermit = async (req: Request, res: Response, next: NextFunc
       return { permit, invoice };
     });
 
+    // 5. System Audit Log Tracking
     await prisma.auditLog.create({
       data: {
         action: 'invoice_created',
         entity: 'Permit',
         entityId: result.permit.id,
-        userId: ownerId,
-        details: { configId, businessId, invoiceId: result.invoice.id },
+        userId: actorId,
+        details: { 
+          configId: permitConfig.id, 
+          businessId, 
+          invoiceId: result.invoice.id,
+          initiatedByRole: actorRole 
+        },
         ipAddress: getIp(req),
       },
     });
 
-    return sendSuccess(res, result, 'Permit application submitted. Proceed to payment.', 201);
-  } catch (err) { next(err); }
+    const successMessage = (actorRole === Role.field_officer)
+      ? 'Permit processed successfully. Forwarding to payment collection panel...'
+      : 'Permit application submitted successfully. Proceed to payment.';
+
+    return sendSuccess(res, result, successMessage, 201);
+  } catch (err) { 
+    next(err); 
+  }
 };
 
 /**
@@ -295,29 +424,83 @@ export const getMyPermits = async (req: Request, res: Response, next: NextFuncti
  */
 export const getMyPermitById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-      let { id } = req.params;
+    let { id } = req.params;
     if (Array.isArray(id)) id = id[0];
-    const ownerId = req.user!.id;
+    
+    const actorId = req.user!.id;
+    const actorRole = req.user!.role;
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId, isActive: true },
-      select: { id: true },
-    });
-    if (!business) return sendError(res, 'No active business found', 'NOT_FOUND', null, 404);
+    // 1. Establish strict access conditions based on security clearances
+    const permitWhere: any = { id };
 
+    // CITIZEN / OWNER FLOW: Strict tenant-isolation containment
+    if (actorRole === Role.citizen || actorRole === Role.business_owner) {
+      permitWhere.business = {
+        ownerId: actorId
+      };
+    } 
+    // FIELD OFFICER FLOW: Scope visibility to their designated territory
+    else if (actorRole === Role.field_officer) {
+      const officer = await prisma.user.findUnique({
+        where: { id: actorId },
+        select: { wardId: true }
+      });
+
+      // Officers can view if they manually raised it OR if the business lives in their ward
+      permitWhere.OR = [
+        { issuedById: actorId },
+        ...(officer?.wardId ? [{ business: { wardId: officer.wardId } }] : [])
+      ];
+    }
+    // WARD COUNCILLOR FLOW: Locked down to their exact geographic ward
+    else if (actorRole === Role.ward_councillor) {
+      const councillor = await prisma.user.findUnique({
+        where: { id: actorId },
+        select: { wardId: true }
+      });
+      
+      if (!councillor?.wardId) {
+        return sendError(res, 'Councillor profile has no assigned ward', 'FORBIDDEN', null, 403);
+      }
+      permitWhere.business = { wardId: councillor.wardId };
+    }
+    // LGA_ADMIN & SUPER_ADMIN FLOW: Bypass filtering entirely (global view read)
+
+    // 2. Query data with optimized relative include blocks
     const permit = await prisma.permit.findFirst({
-      where: { id, businessId: business.id }, // ownership at query level
+      where: permitWhere,
       include: {
-        business: { select: { id: true, businessName: true, address: true } },
-        invoice: true,
-        issuedBy: { select: { id: true, firstName: true, lastName: true } },
+        business: { 
+          select: { 
+            id: true, 
+            businessName: true, 
+            address: true,
+            wardId: true,
+            category:true,
+            owner: { select: { id: true, firstName: true, lastName: true, phone: true } }
+          } 
+        },
+        invoice: {select:{
+          amountPaid:true,
+          totalAmount:true,
+          id:true,
+          balanceDue:true,
+          invoiceNumber:true,
+          status:true
+        }},
+        issuedBy: { select: { id: true, firstName: true, lastName: true, role: true } },
+        config:{select:{id:true, name:true}}
       },
     });
 
-    if (!permit) return sendError(res, 'Permit not found', 'NOT_FOUND', null, 404);
+    if (!permit) {
+      return sendError(res, 'Permit record not found or access unauthorized', 'NOT_FOUND', null, 404);
+    }
 
     return sendSuccess(res, permit);
-  } catch (err) { next(err); }
+  } catch (err) { 
+    next(err); 
+  }
 };
 
 /**
@@ -355,7 +538,7 @@ export const renewPermit = async (req: Request, res: Response, next: NextFunctio
     const result = await prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.create({
         data: {
-          category: existingPermit.category,
+          categoryId: existingPermit.categoryId,
           description: `Permit Renewal — ${existingPermit.config.name} — ${business.businessName}`,
           subtotal: totalAmount,
           totalAmount,
@@ -374,7 +557,7 @@ export const renewPermit = async (req: Request, res: Response, next: NextFunctio
           qrToken: generateQrToken(),
           status: 'pending_payment',
           configId: existingPermit.configId,
-          category: existingPermit.category,
+          categoryId: existingPermit.categoryId,
           validFrom: startDate,
           validTo: endDate,
           businessId: business.id,
@@ -525,7 +708,7 @@ export const verifyPermit = async (req: Request, res: Response, next: NextFuncti
       isExpired,
       permitNumber: permit.permitNumber,
       permitType: permit.config.name, // Pull name directly from config relation
-      category: permit.category,
+      categoryId: permit.categoryId,
       validFrom: permit.validFrom,
       validTo: permit.validTo,
       issuedAt: permit.createdAt,

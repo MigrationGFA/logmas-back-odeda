@@ -251,7 +251,7 @@ router.get('/permits/verify/:code', verifyPermit);
 router.post(
   '/',
   requireAuth,
-  requireRole('business_owner'),
+  requireRole('business_owner',"field_officer"),
   validateBody(createBusinessSchema),
   createBusiness
 );
@@ -508,7 +508,7 @@ router.patch(
 router.post(
   '/permits',
   requireAuth,
-  requireRole('business_owner'),
+  requireRole('business_owner',"field_officer"),
   validateBody(applyPermitSchema),
   applyForPermit
 );
@@ -643,7 +643,7 @@ router.get('/permits', requireAuth, requireRole('business_owner'), getMyPermits)
  *       404:
  *         description: Permit not found
  */
-router.get('/permits/:id', requireAuth, requireRole('business_owner'), getMyPermitById);
+router.get('/permits/:id', requireAuth, requireRole('business_owner',"field_officer"), getMyPermitById);
 
 /**
  * @openapi

@@ -19,7 +19,7 @@ import {
   updatePermitConfig,
   createPermitConfig,
   listPermitConfigs,
-  getTreasurerFieldOfficers,
+  getFieldOfficersList,
 } from './treasurer.controller';
 import {
   createLevyConfigSchema,
@@ -68,8 +68,11 @@ const router = Router();
  *           format: date
  */
 
+router.use(requireAuth)
+router.get('/field-officers',requireRole("agent","lga_admin","treasurer","contractor"), getFieldOfficersList);
+
 // Enforce strict treasury access - only treasurer, finance, or super admin
-router.use(requireAuth, requireRole('treasurer', 'super_admin',"lga_admin"));
+router.use( requireRole('treasurer', 'super_admin',"lga_admin"));
 
 // ============================================================
 // LEVY CONFIGURATION MANAGEMENT
@@ -568,7 +571,7 @@ router.get('/revenue', getRevenueOverview);
  */
 router.get('/revenue/by-officer', getRevenueByOfficer);
 
-router.get('/field-officers', getTreasurerFieldOfficers);
+
 
 /**
  * @openapi

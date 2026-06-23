@@ -8,7 +8,7 @@ import {
   generateQrToken,
   generateReference,
 } from "../../utils/generators";
-import { RevenueCategory, PaymentMethod } from "@prisma/client";
+import { RevenueCategory, PaymentMethod, Role } from "@prisma/client";
 import { getIp, queryString } from "../complaints/complaints.controller";
 
 // ─────────────────────────────────────────────────────────────
@@ -390,26 +390,44 @@ export const generateInvoice = async (
  * On partial payment → invoice status set to partially_paid.
  */
 export const recordPayment = async (req: Request, res: Response, next: NextFunction) => {
-  try {
+ try {
     const officerId = req.user!.id;
-    const { invoiceId, amount, method, reference, narration } = req.body;
+    const actorRole = req.user!.role;
+    
+    // 1. Structural Parameter Sourcing
+    let { permitId } = req.params;
+    if (Array.isArray(permitId)) permitId = permitId[0];
 
-    // 1. Fetch invoice and include the linked permit structure safely
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: invoiceId },
+    const { amount, method, reference, narration } = req.body;
+
+    // Guard: Ensure only field collection agents can execute cash/POS settlements
+    if (actorRole !== Role.field_officer && actorRole !== Role.super_admin && actorRole !== Role.lga_admin) {
+      return sendError(res, "Unauthorized operational clearance level", "FORBIDDEN", null, 403);
+    }
+
+    // 2. Fetch the Permit and its direct unique Invoice relation
+    const permit = await prisma.permit.findUnique({
+      where: { id: permitId },
       include: {
-        business: { select: { id: true, businessName: true, ownerName: true } },
-        permit: { select: { id: true, status: true } }, // 🚀 Include connected permit array
-      },
+        invoice: {
+          include: {
+            business: { select: { id: true, businessName: true } }
+          }
+        }
+      }
     });
 
-    if (!invoice) return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
+    if (!permit) return sendError(res, "Permit target record not found", "NOT_FOUND", null, 404);
+    if (!permit.invoice) return sendError(res, "No attached billing ledger invoice found for this permit", "NOT_FOUND", null, 404);
+    
+    const invoice = permit.invoice;
 
-    if (invoice.status === "paid") {
-      return sendError(res, "This invoice has already been paid", "BAD_REQUEST", null, 400);
+    // Status Guards
+    if (invoice.status === "paid" || permit.status === "issued") {
+      return sendError(res, "This permit has already been paid and issued", "BAD_REQUEST", null, 400);
     }
     if (invoice.status === "cancelled") {
-      return sendError(res, "Cannot record payment on a cancelled invoice", "BAD_REQUEST", null, 400);
+      return sendError(res, "Cannot collect funds against a cancelled invoice ledger", "BAD_REQUEST", null, 400);
     }
 
     const paymentAmount = Number(amount);
@@ -418,7 +436,7 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
     if (paymentAmount > balanceDue) {
       return sendError(
         res,
-        `Payment amount (${paymentAmount}) exceeds balance due (${balanceDue})`,
+        `Collection value (₦${paymentAmount}) exceeds outstanding balance due (₦${balanceDue})`,
         "BAD_REQUEST",
         null,
         400
@@ -429,26 +447,27 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
     const newAmountPaid = Number(invoice.amountPaid) + paymentAmount;
     const newBalanceDue = balanceDue - paymentAmount;
 
-    // 2. RUN ATOMIC TRANSACTION MATRIX
+    // 3. EXECUTE ATOMIC TRANSACTION CONTEXT
     const result = await prisma.$transaction(async (tx) => {
-      // A. Write payment ledger entry
+      
+      // A. Write standard transaction payment log
       const payment = await tx.payment.create({
         data: {
-          invoiceId,
+          invoiceId: invoice.id,
           amount: paymentAmount,
           method: method as PaymentMethod,
           status: "confirmed",
           reference: reference || generateReference("PAY"),
-          narration,
+          narration: narration || `Field collection for ${invoice.description}`,
           confirmedAt: new Date(),
           confirmedById: officerId,
           paidById: invoice.createdById,
         },
       });
 
-      // B. Update invoice structural stats
+      // B. Update Invoice Balancing Properties
       const updatedInvoice = await tx.invoice.update({
-        where: { id: invoiceId },
+        where: { id: invoice.id },
         data: {
           amountPaid: newAmountPaid,
           balanceDue: newBalanceDue,
@@ -458,45 +477,52 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
       });
 
       let receipt = null;
-      let updatedPermit = null;
+      let updatedPermit = permit;
 
-      // C. Full payment settlement block
+      // C. Action triggers for Full Settlements
       if (isFullPayment) {
-        // Generate the official receipt securely
+        // Generate security-backed printable receipt layout
         receipt = await tx.receipt.create({
           data: {
             receiptNumber: generateReceiptNumber("RCP"),
             verificationCode: generateVerificationCode(),
             qrToken: generateQrToken(),
             amountPaid: newAmountPaid,
-            invoiceId,
+            invoiceId: invoice.id,
             issuedById: officerId,
           },
         });
 
-        // 🚀 D. Auto-Issue the linked trade permit instantly
-        const targetPermit = invoice.permit?.[0]; // Grab the first linked permit draft
-        if (targetPermit) {
-          updatedPermit = await tx.permit.update({
-            where: { id: targetPermit.id },
-            data: {
-              status: 'issued', // ◄ Mutate status from pending_payment to active issuance!
+        // Activate the document state instantly on the field
+        updatedPermit = await tx.permit.update({
+          where: { id: permitId },
+          data: { status: 'issued' },
+          include: {
+            invoice: {
+              include: {
+                business: {
+                  select: { id: true, businessName: true },
+                },
+              },
             },
-          });
-        }
+            business: {
+              select: { id: true, businessName: true },
+            },
+          },
+        });
       }
 
       return { payment, invoice: updatedInvoice, receipt, permit: updatedPermit };
     });
 
-    // 3. Post-Transaction Audit Trails
+    // 4. Trace Operations securely through background Audit Log chains
     await prisma.auditLog.create({
       data: {
         action: "payment_confirmed",
         entity: "Payment",
         entityId: result.payment.id,
         userId: officerId,
-        details: { invoiceId, amount: paymentAmount, method, isFullPayment, receiptId: result.receipt?.id ?? null },
+        details: { invoiceId: invoice.id, permitId, amount: paymentAmount, method, isFullPayment },
         ipAddress: getIp(req),
       },
     });
@@ -504,31 +530,15 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
     if (result.receipt) {
       await prisma.auditLog.create({
         data: {
-          action: "receipt_generated",
-          entity: "Receipt",
-          entityId: result.receipt.id,
-          userId: officerId,
-          details: { invoiceId, receiptNumber: result.receipt.receiptNumber },
-          ipAddress: getIp(req),
-        },
-      });
-    }
-
-    // Trace the permit issuance change in system logs
-    if (result.permit) {
-      await prisma.auditLog.create({
-        data: {
           action: "permit_issued",
           entity: "Permit",
-          entityId: result.permit.id,
+          entityId: permitId,
           userId: officerId,
-          details: { permitId: result.permit.id, status: result.permit.status },
+          details: { receiptId: result.receipt.id, invoiceId: invoice.id },
           ipAddress: getIp(req),
         },
       });
     }
-
-    // TODO Phase 7: Send SMS/WhatsApp receipt/QR payload links to business owner
 
     return sendSuccess(
       res,
@@ -536,12 +546,12 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
         payment: result.payment,
         invoice: result.invoice,
         receipt: result.receipt,
-        permit: result.permit, // Return updated object back down to frontend
-        message: isFullPayment
-          ? "Full payment recorded. Receipt generated and Trade Permit issued immediately."
-          : `Partial payment recorded. Balance due: ₦${newBalanceDue}`,
+        permit: result.permit,
+        message: isFullPayment 
+          ? "Payment processed fully. Permit document is now active and issued."
+          : `Partial collection logged. Balance outstanding: ₦${newBalanceDue}`,
       },
-      isFullPayment ? "Payment confirmed and permit officially issued" : "Partial payment recorded"
+      isFullPayment ? "Collection settled and permit issued." : "Partial settlement recorded."
     );
   } catch (err) {
     next(err);

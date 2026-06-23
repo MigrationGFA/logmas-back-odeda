@@ -119,15 +119,15 @@ export const login = async (
     return sendSuccess(res, {
       accessToken,
       refreshToken,
-      // user: {
-      //   // ← THIS was missing
-      //   id: user.id,
-      //   email: user.email,
-      //   firstName: user.firstName,
-      //   lastName: user.lastName,
-      //   role: user.role,
-      //   isActive: user.isActive,
-      // },
+      user: {
+        // ← THIS was missing
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        isActive: user.isActive,
+      },
     });
   } catch (err) {
     next(err);

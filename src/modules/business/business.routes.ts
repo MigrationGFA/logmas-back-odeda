@@ -808,7 +808,7 @@ router.get(
   '/invoices',
   requireAuth,
   requireRole('business_owner'),
-  validateQuery(listInvoicesSchema),
+  // validateQuery(listInvoicesSchema),
   getMyInvoices
 );
 

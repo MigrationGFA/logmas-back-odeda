@@ -79,14 +79,14 @@ router.post('/invoices', ...guard, validateBody(generateInvoiceSchema), generate
 
 /**
  * @openapi
- * /field-officer/payments:
+ * /field-officer/permits/:permitId/collect:
  *   post:
  *     tags: [Field Officer]
  *     summary: Record a cash or POS payment — auto-generates receipt on full payment
  *     security:
  *       - BearerAuth: []
  */
-router.post('/payments', ...guard, validateBody(recordPaymentSchema), recordPayment);
+router.post('/permits/:permitId/collect', ...guard, validateBody(recordPaymentSchema), recordPayment);
 
 // ── PERMITS ───────────────────────────────────────────────────
 

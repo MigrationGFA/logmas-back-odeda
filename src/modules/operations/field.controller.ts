@@ -635,8 +635,8 @@ export const issuePermit = async (
         category: { connect: { id: categoryId } },
         validFrom: startDate,
         validTo: endDate,
-        businessId,
-        issuedById: officerId,
+        business: { connect: { id: businessId } },
+        issuedBy: { connect: { id: officerId } },
         invoice: { connect: { id: invoiceId } },
       },
       include: {
@@ -1172,7 +1172,7 @@ export const getCollectionSummary = async (
         transactions: allTimeSummary._count._all,
       },
       byCategory: byCategory.map((c) => ({
-        category: c.category,
+        category: c.categoryId,
         collected: c._sum.amountPaid ?? 0,
         transactions: c._count._all,
       })),

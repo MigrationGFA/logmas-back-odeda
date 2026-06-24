@@ -413,8 +413,8 @@ model Permit {
 
   // RELATIONAL CONFIGURATION REPLACEMENT:
   // Instead of a simple string or just a raw enum, tie it to the config entity
-  configId String
-  config   PermitConfig @relation(fields: [configId], references: [id])
+  configId String?
+  config   PermitConfig? @relation(fields: [configId], references: [id])
 
   // Keep category cached on the row or pull it dynamically via the config relation
   categoryId String

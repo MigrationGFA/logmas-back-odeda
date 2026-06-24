@@ -357,7 +357,7 @@ export const verifyReceipt = async (req: Request, res: Response, next: NextFunct
       amountPaid:    receipt.amountPaid,
       issuedAt:      receipt.issuedAt,
       issuedBy:      `${receipt.issuedBy.firstName} ${receipt.issuedBy.lastName}`,
-      category:      receipt.invoice.category,
+      category:      receipt.invoice.categoryId,
       business:      receipt.invoice.business ?? null,
       issuingAuthority: 'Ijebu North East Local Government',
     });

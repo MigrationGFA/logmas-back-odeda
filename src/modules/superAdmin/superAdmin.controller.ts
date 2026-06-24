@@ -157,7 +157,7 @@ export const getUserById = async (req: Request, res: Response, next: NextFunctio
         ward:   { select: { id: true, name: true, code: true } },
         contractorId: true,
         contractor:   { select: { id: true, firstName: true, lastName: true } },
-        fieldOfficers:{ select: { id: true, firstName: true, lastName: true, role: true, isActive: true } },
+        // fieldOfficers:{ select: { id: true, firstName: true, lastName: true, role: true, isActive: true } },
         agents:       { select: { id: true, firstName: true, lastName: true, isActive: true } },
         lastLoginAt: true, createdAt: true, updatedAt: true,
         _count: {
@@ -428,7 +428,7 @@ export const getGlobalAnalytics = async (req: Request, res: Response, next: Next
 
       // Revenue by category
       prisma.invoice.groupBy({
-        by: ['category'],
+        by: ['categoryId'],
         where: { createdAt: dateRange },
         _sum: { amountPaid: true },
         _count: { _all: true },
@@ -484,7 +484,7 @@ export const getGlobalAnalytics = async (req: Request, res: Response, next: Next
         totalInvoices:    revenueSummary._count._all,
         collectionRate:   `${collectionRate}%`,
         byCategory: revenueByCategory.map((c) => ({
-          category:    c.category,
+          category:    c.categoryId,
           collected:   c._sum.amountPaid ?? 0,
           transactions: c._count._all,
         })),

@@ -208,7 +208,13 @@ model User {
   // supervisor    User?   @relation("SupervisorOfficers", fields: [supervisorId], references: [id])
   // fieldOfficers User[]  @relation("SupervisorOfficers")
 
+  isWalkIn          Boolean  @default(false)  // auto-created by field officer
+  walkInRegisteredById String?               // which officer created them
+  walkInRegisteredBy   User?  @relation("WalkInCreator", fields: [walkInRegisteredById], references: [id])
+  walkInUsers          User[] @relation("WalkInCreator")
+
   // Document system relationships
+  violationsLogged Violation[] @relation("ViolationLoggedBy")
   stateOfOriginApplications StateOfOriginApplication[]
   businesses                Business[]
   invoicesCreated           Invoice[]                  @relation("InvoiceCreatedBy")
@@ -244,7 +250,7 @@ model Ward {
   // 2. The explicit singular politician head managing this node
   councillor  User?  @relation("WardCouncillor")
   contractors User[] @relation("ContractorWards")
-
+  violations Violation[]
   complaints                Complaint[]
   stateOfOriginApplications StateOfOriginApplication[]
   businesses                Business[]
@@ -348,6 +354,7 @@ model Business {
 
   permits  Permit[]
   invoices Invoice[]
+  violations Violation[]
 
   @@map("businesses")
 }
@@ -386,6 +393,7 @@ model PermitConfig {
   categoryId String
   category   RevenueCategory @relation(fields: [categoryId], references: [id])
   isActive   Boolean         @default(true)
+  validity  String?
 
   // Relations
   permits   Permit[]
@@ -405,8 +413,8 @@ model Permit {
 
   // RELATIONAL CONFIGURATION REPLACEMENT:
   // Instead of a simple string or just a raw enum, tie it to the config entity
-  configId String
-  config   PermitConfig @relation(fields: [configId], references: [id])
+  configId String?
+  config   PermitConfig? @relation(fields: [configId], references: [id])
 
   // Keep category cached on the row or pull it dynamically via the config relation
   categoryId String
@@ -621,6 +629,46 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@map("notifications")
+}
+
+model Violation {
+  id          String   @id @default(uuid())
+  businessId  String?
+  business    Business? @relation(fields: [businessId], references: [id])
+
+  // If business not yet registered — capture manually
+  businessName String?
+  address      String?
+  wardId       String
+  ward         Ward     @relation(fields: [wardId], references: [id])
+
+  description  String
+  severity     ViolationSeverity @default(minor)
+  status       ViolationStatus   @default(open)
+
+  loggedById   String
+  loggedBy     User     @relation("ViolationLoggedBy", fields: [loggedById], references: [id])
+
+  resolvedAt   DateTime?
+  resolvedNote String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("violations")
+}
+
+enum ViolationSeverity {
+  minor
+  moderate
+  critical
+}
+
+enum ViolationStatus {
+  open
+  under_review
+  resolved
+  dismissed
 }
 
 // ============================================================

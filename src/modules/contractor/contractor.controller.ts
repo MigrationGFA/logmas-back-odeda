@@ -43,7 +43,7 @@ export const getOfficerCollections = async (req: Request, res: Response, next: N
     if (Array.isArray(id)) id = id[0];
     const {  } = req.params;
     const date     = queryString(req.query.date);
-    const category = queryString(req.query.category) as RevenueCategory | undefined;
+    // const category = queryString(req.query.category) as RevenueCategory | undefined;
     const page     = parseInt(queryString(req.query.page)  ?? '1');
     const limit    = parseInt(queryString(req.query.limit) ?? '10');
     const skip     = (page - 1) * limit;
@@ -70,7 +70,7 @@ export const getOfficerCollections = async (req: Request, res: Response, next: N
     const where: any = {
       assignedOfficerId: id,
       createdAt: { gte: startOfDay, lte: endOfDay },
-      ...(category && { category }),
+      // ...(category && { category }),
     };
 
     const [invoices, total, summary] = await Promise.all([
@@ -163,7 +163,7 @@ export const getContractorSummary = async (req: Request, res: Response, next: Ne
 
       // Breakdown by revenue category
       prisma.invoice.groupBy({
-        by: ['category'],
+        by: ['categoryId'],
         where: { assignedOfficerId: { in: officerIds } },
         _sum: { amountPaid: true },
         _count: { _all: true },
@@ -193,7 +193,7 @@ export const getContractorSummary = async (req: Request, res: Response, next: Ne
       },
       byOfficer: enrichedByOfficer,
       byCategory: byCategory.map((c) => ({
-        category:     c.category,
+        category:     c.categoryId,
         collected:    c._sum.amountPaid ?? 0,
         transactions: c._count._all,
       })),

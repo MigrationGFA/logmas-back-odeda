@@ -38,6 +38,15 @@ export const listCategories = async (
             // mode: true,
           },
         },
+        permitConfigs: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            name: true,
+            baseAmount:true,
+            isActive:true
+          },
+        },
       },
     });
 

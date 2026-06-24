@@ -5,8 +5,8 @@ import { prisma } from "../../utils/prisma";
 import { generateAccessToken, generateRefreshToken } from "../../utils/jwt";
 import { sendSuccess, sendError } from "../../utils/response";
 import { OAuth2Client } from "google-auth-library";
-import jwt from 'jsonwebtoken';
-import env from '../../config/env';
+import jwt from "jsonwebtoken";
+import env from "../../config/env";
 
 export const register = async (
   req: Request,
@@ -39,7 +39,11 @@ export const register = async (
     if (!user || !(await bcrypt.compare(password, user.password))) {
       // Log failed attempt before returning
       await prisma.auditLog.create({
-        data: { action: "login_failed", details: JSON.stringify({ email }), ipAddress: req.ip },
+        data: {
+          action: "login_failed",
+          details: JSON.stringify({ email }),
+          ipAddress: req.ip,
+        },
       });
       return sendError(res, "Invalid credentials", "UNAUTHORIZED", null, 401);
     }
@@ -86,7 +90,7 @@ export const login = async (
       where: { email, deletedAt: null },
     });
 
-    console.log(user,"⛔")
+    console.log(user, "⛔");
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return sendError(
         res,
@@ -101,25 +105,30 @@ export const login = async (
       id: user.id,
       role: user.role,
       email: user.email,
-      wardId: user.wardId
+      wardId: user.wardId,
     });
     const refreshToken = generateRefreshToken({ id: user.id });
 
-   await prisma.user.update({
+    await prisma.user.update({
       where: { id: user.id },
       data: {
-        lastLoginAt: new Date()
+        lastLoginAt: new Date(),
       },
     });
 
-    return sendSuccess(res, { accessToken, refreshToken, user: {               // ← THIS was missing
-        id:        user.id,
-        email:     user.email,
+    return sendSuccess(res, {
+      accessToken,
+      refreshToken,
+      user: {
+        // ← THIS was missing
+        id: user.id,
+        email: user.email,
         firstName: user.firstName,
-        lastName:  user.lastName,
-        role:      user.role,
-        isActive:  user.isActive,
-      }, });
+        lastName: user.lastName,
+        role: user.role,
+        isActive: user.isActive,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -131,7 +140,10 @@ export const getMe = async (
   next: NextFunction,
 ) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user?.id } });
+    const user = await prisma.user.findUnique({
+      where: { id: req.user?.id },
+      include: { ward: { select: { id: true, name: true } } },
+    });
     if (!user)
       return sendError(
         res,
@@ -227,24 +239,40 @@ export const googleLogin = async (
   }
 };
 
-
 // auth.controller.ts
-export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
+export const refreshToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) return sendError(res, 'Refresh token required', 'BAD_REQUEST', null, 400);
+    if (!refreshToken)
+      return sendError(res, "Refresh token required", "BAD_REQUEST", null, 400);
 
-    const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as { id: string };
+    const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as {
+      id: string;
+    };
     const user = await prisma.user.findUnique({ where: { id: decoded.id } });
 
     if (!user || !user.isActive || user.deletedAt) {
-      return sendError(res, 'Invalid refresh token', 'UNAUTHORIZED', null, 401);
+      return sendError(res, "Invalid refresh token", "UNAUTHORIZED", null, 401);
     }
 
-    const accessToken = generateAccessToken({ id: user.id, role: user.role, email: user.email });
+    const accessToken = generateAccessToken({
+      id: user.id,
+      role: user.role,
+      email: user.email,
+    });
     return sendSuccess(res, { accessToken });
   } catch (err) {
-    return sendError(res, 'Invalid or expired refresh token', 'UNAUTHORIZED', null, 401);
+    return sendError(
+      res,
+      "Invalid or expired refresh token",
+      "UNAUTHORIZED",
+      null,
+      401,
+    );
   }
 };
 

@@ -307,26 +307,104 @@ export const fetchMetricsByRole = async (
       };
     }
 
-    case Role.contractor: {
-      // Contractor scope: Metrics for their sub-agents and assigned invoices
-      const [agentsCount, totalCollections] = await Promise.all([
-        prisma.user.count({
-          where: { contractorId: userId, role: Role.agent, isActive: true },
-        }),
-        prisma.invoice.aggregate({
-          where: {
-            createdBy: { contractorId: userId },
-            status: InvoiceStatus.paid,
-          },
-          _sum: { amountPaid: true },
-        }),
-      ]);
+    case Role.contractor:
+    case Role.agent: {
+      const isContractor = role === Role.contractor;
 
-      return {
-        metrics: {
-          managedAgents: agentsCount,
-          totalCollections: Number(totalCollections._sum.amountPaid || 0),
+      // 1. Dynamic query filters based on active session role
+      const officerFilter = isContractor
+        ? { contractorId: userId, role: Role.agent }
+        : { agentId: userId, role: Role.field_officer };
+
+      const invoiceFilter = isContractor
+        ? { createdBy: { contractorId: userId } }
+        : {
+            createdBy: {
+              OR: [{ id: userId }, { agentId: userId }],
+            },
+          };
+
+      // 2. Fetch Agents/Officers managed under this user
+      const officers = await prisma.user.findMany({
+        where: officerFilter,
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          isActive: true,
+          createdAt: true,
         },
+      });
+
+      // 3. Fetch all invoices generated in their respective scopes
+      const invoices = await prisma.invoice.findMany({
+        where: invoiceFilter,
+        include: {
+          business: { select: { businessName: true } },
+          permit: { select: { id: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // 4. Extract separate array collections matching UI expectations
+      const receipts = invoices
+        .filter(
+          (inv) =>
+            inv.status === InvoiceStatus.paid || Number(inv.amountPaid) > 0,
+        )
+        .map((inv) => ({
+          id: `rcpt-${inv.id}`,
+          invoiceId: inv.id,
+          amount: Number(inv.amountPaid),
+          createdAt: inv.paidAt ?? inv.updatedAt,
+        }));
+
+      // 5. Calculate dynamic revenue trends grouped by month
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+      const monthlyCollections = await prisma.invoice.groupBy({
+        by: ["createdAt"],
+        where: {
+          ...invoiceFilter,
+          status: InvoiceStatus.paid,
+          createdAt: { gte: sixMonthsAgo },
+        },
+        _sum: { amountPaid: true },
+      });
+
+      const revenueTrend = monthlyCollections.map((item) => ({
+        month: new Date(item.createdAt).toLocaleDateString("en-US", {
+          month: "short",
+        }),
+        amount: Number(item._sum.amountPaid || 0),
+      }));
+
+      // Shape unified response object payload mapping perfectly to your store hooks
+      return {
+        invoices: invoices.map((i) => ({
+          id: i.id,
+          invoiceNumber: i.invoiceNumber,
+          status:
+            i.status === InvoiceStatus.paid
+              ? "paid"
+              : i.status === InvoiceStatus.overdue
+                ? "overdue"
+                : "unpaid",
+          amount: Number(i.totalAmount),
+          balanceDue: Number(i.balanceDue),
+          customerName: i.business?.businessName ?? "Local Taxpayer",
+          createdAt: i.createdAt,
+        })),
+        receipts,
+        officers: officers.map((o) => ({
+          id: o.id,
+          name: `${o.firstName} ${o.lastName}`,
+          phone: o.phone,
+          status: o.isActive ? "active" : "inactive",
+        })),
+        revenueTrend,
       };
     }
 

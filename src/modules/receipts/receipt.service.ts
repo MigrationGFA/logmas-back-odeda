@@ -20,6 +20,21 @@ export const fetchAllUserReceipts = async ({
     };
   } else if (role === Role.field_officer) {
     baseWhere.invoice = { createdById: userId };
+  } else if (role === Role.agent) {
+    // 🚀 Agents see receipts created by themselves OR by field officers under their supervision
+    baseWhere.invoice = {
+      createdBy: {
+        OR: [
+          { id: userId },
+          { agentId: userId }
+        ]
+      }
+    };
+  } else if (role === Role.contractor) {
+    // 🚀 Contractors see all receipts across their entire sub-agent and field officer tree
+    baseWhere.invoice = {
+      createdBy: { contractorId: userId }
+    };
   }
 
   const receipts = await prisma.receipt.findMany({
@@ -28,12 +43,11 @@ export const fetchAllUserReceipts = async ({
       invoice: {
         include: {
           business: { select: { businessName: true, phone: true } },
-          category:true,
+          category: true,
           createdBy: {
             select: { firstName: true, lastName: true, phone: true },
           },
           payments: {
-            // ← add this
             where: { status: "confirmed" },
             orderBy: { createdAt: "desc" },
             take: 1,
@@ -56,7 +70,7 @@ export const fetchAllUserReceipts = async ({
       receiptNumber: r.receiptNumber,
       amount: Number(r.amountPaid),
       customerName,
-      levyType: r.invoice.category.name,
+      levyType: r.invoice.category?.name || "Local Revenue Item",
       paidAt: r.issuedAt.toISOString(),
       paymentMethod: r.invoice.payments?.[0]?.method ?? "online",
       invoiceId: r.invoiceId,
@@ -64,8 +78,8 @@ export const fetchAllUserReceipts = async ({
   });
 
   return {
-    data:allReceipts
-  }
+    data: allReceipts
+  };
 };
 
 export const fetchReceiptByIdentifier = async (

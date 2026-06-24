@@ -615,69 +615,111 @@ export const getRevenueByOfficer = async (
 };
 
 
-export const getTreasurerFieldOfficers = async (req: Request, res: Response) => {
+
+
+export const getFieldOfficersList = async (req: Request, res: Response) => {
   try {
-    // 1. Fetch all field officers. 
-    // Note: Treasurer has view-only access, so we don't need complex filtering by contractorId here.
+    const { id: userId, role } = req.user!; // Extracted from auth middleware
+
+    // 1. Scope query filter variables dynamically based on hierarchy roles
+    const whereClause: any = {
+      deletedAt: null, // Exclude soft-deleted users globally
+    };
+
+    if (role === "contractor") {
+      // Contractors see all agents & field officers down their operational tree
+      whereClause.contractorId = userId;
+      whereClause.role = { in: ["agent", "field_officer"] };
+    } else if (role === "agent") {
+      // Agents only see the specific field officers assigned under them
+      whereClause.agentId = userId;
+      whereClause.role = "field_officer";
+    } else {
+      // Treasurer / Admin / Superadmin roles see all transactional field workers
+      whereClause.role = { in: ["agent", "field_officer"] };
+    }
+
+    // 2. Query database using dynamic scoping boundaries
     const officers = await prisma.user.findMany({
-      where: {
-        role: 'field_officer',
-        deletedAt: null, // Exclude soft-deleted users
-      },
+      where: whereClause,
       include: {
         ward: true,
-        createdBy: true,
+        createdBy: {
+          select: { firstName: true, lastName: true },
+        },
+        // Pull invoices they are assigned to execute collection duties on
         invoicesAssignedTo: {
           include: {
             category: true,
             payments: {
-              where: { status: 'confirmed' },
-              select: { amount: true }
-            }
-          }
-        }
+              where: { status: "confirmed" },
+              select: { amount: true },
+            },
+          },
+        },
+        // Pull invoices they personally generated out in the field
+        invoicesCreated: {
+          include: {
+            category: true,
+            payments: {
+              where: { status: "confirmed" },
+              select: { amount: true },
+            },
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: "desc" },
     });
 
-    // 2. Map the data to match the frontend's expected structure
-    const mappedOfficers = officers.map((o) => {
-      // Calculate total collected from confirmed payments on their assigned invoices
-      const totalCollected = o.invoicesAssignedTo.reduce((sum, inv) => {
-        const invTotal = inv.payments.reduce((pSum, p) => pSum + Number(p.amount), 0);
-        return sum + invTotal;
-      }, 0);
+  // 3. Map values safely to match frontend UI components exactly
+  const mappedOfficers = officers.map((o) => {
+    // A collection agent or officer might be collecting via both assignments or creations.
+    // We safe-guard calculation arrays here:
+    const assignedPaymentsTotal = o.invoicesAssignedTo.reduce((sum, inv) => {
+      return sum + inv.payments.reduce((pSum, p) => pSum + Number(p.amount), 0);
+    }, 0);
 
-      // Extract unique levy categories they are assigned to
-      const levies = [...new Set(o.invoicesAssignedTo.map((inv) => inv.category.name))];
+    const createdPaymentsTotal = o.invoicesCreated.reduce((sum, inv) => {
+      return sum + inv.payments.reduce((pSum, p) => pSum + Number(p.amount), 0);
+    }, 0);
 
-      // Determine status based on suspension/deletion flags in the DB
-      let status: 'active' | 'suspended' | 'deactivated' = 'active';
-      if (o.deletedAt) status = 'deactivated';
-      else if (o.suspendedAt) status = 'suspended';
+    // Dynamic collection calculation fallback
+    const totalCollected = Math.max(assignedPaymentsTotal, createdPaymentsTotal);
 
-      return {
-        id: o.id,
-        name: `${o.firstName} ${o.lastName}`,
-        email: o.email,
-        ward: o.ward?.name || 'Unassigned',
-        levies: levies.length > 0 ? levies : ['General'], // Fallback if no invoices assigned yet
-        invoicesIssued: o.invoicesAssignedTo.length,
-        totalCollected,
-        status,
-        createdBy: o.createdBy 
-          ? `${o.createdBy.firstName} ${o.createdBy.lastName}` 
-          : 'System',
-        // Keeping contractorId in case the frontend needs it for any residual logic
-        contractorId: o.contractorId, 
-      };
-    });
+    // Merge unique revenue item category names from both paths
+    const assignedCategories = o.invoicesAssignedTo.map((inv) => inv.category?.name);
+    const createdCategories = o.invoicesCreated.map((inv) => inv.category?.name);
+    const levies = [...new Set([...assignedCategories, ...createdCategories])].filter(Boolean);
 
-    // 3. Calculate summary stats for the dashboard cards
+    // Guard user status states
+    let status: "active" | "suspended" | "deactivated" = "active";
+    if (o.deletedAt) status = "deactivated";
+    else if (!o.isActive || o.suspendedAt) status = "suspended";
+
+    return {
+      id: o.id,
+      name: `${o.firstName} ${o.lastName}`,
+      email: o.email,
+      phone: o.phone ?? "N/A",
+      role: o.role, // "agent" or "field_officer"
+      ward: o.ward?.name || "Unassigned",
+      levies: levies.length > 0 ? levies : ["General Collection"],
+      invoicesIssued: Math.max(o.invoicesAssignedTo.length, o.invoicesCreated.length),
+      totalCollected,
+      status,
+      createdBy: o.createdBy
+        ? `${o.createdBy.firstName} ${o.createdBy.lastName}`
+        : "System",
+      contractorId: o.contractorId,
+      agentId: o.agentId,
+    };
+  });
+
+    // 4. Group metrics matching the frontend dashboard card grid layout
     const stats = {
       totalOfficers: mappedOfficers.length,
-      active: mappedOfficers.filter((o) => o.status === 'active').length,
-      suspended: mappedOfficers.filter((o) => o.status === 'suspended').length,
+      active: mappedOfficers.filter((o) => o.status === "active").length,
+      suspended: mappedOfficers.filter((o) => o.status === "suspended").length,
       totalCollected: mappedOfficers.reduce((sum, o) => sum + o.totalCollected, 0),
     };
 
@@ -689,8 +731,8 @@ export const getTreasurerFieldOfficers = async (req: Request, res: Response) => 
       },
     });
   } catch (error) {
-    console.error('Error fetching field officers for treasurer:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error fetching scoped field personnel list:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 

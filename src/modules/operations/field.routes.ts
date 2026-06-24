@@ -12,6 +12,9 @@ import {
   getMyCollections,
   getCollectionSummary,
   getAllWardBusinesses,
+  getWardPermits,
+  issueDemandNotice,
+  logViolation,
 } from './field.controller';
 import {
   registerBusinessSchema,
@@ -76,14 +79,14 @@ router.post('/invoices', ...guard, validateBody(generateInvoiceSchema), generate
 
 /**
  * @openapi
- * /field-officer/payments:
+ * /field-officer/permits/:permitId/collect:
  *   post:
  *     tags: [Field Officer]
  *     summary: Record a cash or POS payment — auto-generates receipt on full payment
  *     security:
  *       - BearerAuth: []
  */
-router.post('/payments', ...guard, validateBody(recordPaymentSchema), recordPayment);
+router.post('/permits/:permitId/collect', ...guard, validateBody(recordPaymentSchema), recordPayment);
 
 // ── PERMITS ───────────────────────────────────────────────────
 
@@ -96,7 +99,20 @@ router.post('/payments', ...guard, validateBody(recordPaymentSchema), recordPaym
  *     security:
  *       - BearerAuth: []
  */
-router.post('/permits', ...guard, validateBody(issuePermitSchema), issuePermit);
+router.post('/permits/:permitId/demand-notice', ...guard, issueDemandNotice);
+
+/**
+ * @openapi
+ * /field-officer/permits:
+ *   get:
+ *     tags: [Field Officer]
+ *     summary: Get permitst hub
+ *     security:
+ *       - BearerAuth: []
+ */
+router.get('/permits', ...guard, getWardPermits);
+
+router.post('/violations', ...guard, logViolation);
 
 // ── RECEIPT VERIFICATION ──────────────────────────────────────
 

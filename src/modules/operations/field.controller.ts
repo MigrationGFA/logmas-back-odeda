@@ -131,6 +131,21 @@ export const getAllWardBusinesses = async (
             code: true,
           },
         },
+        invoices: {
+          where: {
+            status: { notIn: ["draft", "cancelled"] }, // Exclude internal or un-issued records
+          },
+          select: {
+            id: true,
+            invoiceNumber: true,
+            totalAmount: true,
+            amountPaid: true,
+            balanceDue: true,
+            status: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+        },
         permits: {
           where: { status: "issued" },
           orderBy: { createdAt: "desc" },
@@ -389,11 +404,15 @@ export const generateInvoice = async (
  * On full payment → receipt is auto-generated immediately.
  * On partial payment → invoice status set to partially_paid.
  */
-export const recordPayment = async (req: Request, res: Response, next: NextFunction) => {
- try {
+export const recordPayment = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
     const officerId = req.user!.id;
     const actorRole = req.user!.role;
-    
+
     // 1. Structural Parameter Sourcing
     let { permitId } = req.params;
     if (Array.isArray(permitId)) permitId = permitId[0];
@@ -401,8 +420,18 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
     const { amount, method, reference, narration } = req.body;
 
     // Guard: Ensure only field collection agents can execute cash/POS settlements
-    if (actorRole !== Role.field_officer && actorRole !== Role.super_admin && actorRole !== Role.lga_admin) {
-      return sendError(res, "Unauthorized operational clearance level", "FORBIDDEN", null, 403);
+    if (
+      actorRole !== Role.field_officer &&
+      actorRole !== Role.super_admin &&
+      actorRole !== Role.lga_admin
+    ) {
+      return sendError(
+        res,
+        "Unauthorized operational clearance level",
+        "FORBIDDEN",
+        null,
+        403,
+      );
     }
 
     // 2. Fetch the Permit and its direct unique Invoice relation
@@ -411,23 +440,49 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
       include: {
         invoice: {
           include: {
-            business: { select: { id: true, businessName: true } }
-          }
-        }
-      }
+            business: { select: { id: true, businessName: true } },
+          },
+        },
+      },
     });
 
-    if (!permit) return sendError(res, "Permit target record not found", "NOT_FOUND", null, 404);
-    if (!permit.invoice) return sendError(res, "No attached billing ledger invoice found for this permit", "NOT_FOUND", null, 404);
-    
+    if (!permit)
+      return sendError(
+        res,
+        "Permit target record not found",
+        "NOT_FOUND",
+        null,
+        404,
+      );
+    if (!permit.invoice)
+      return sendError(
+        res,
+        "No attached billing ledger invoice found for this permit",
+        "NOT_FOUND",
+        null,
+        404,
+      );
+
     const invoice = permit.invoice;
 
     // Status Guards
     if (invoice.status === "paid" || permit.status === "issued") {
-      return sendError(res, "This permit has already been paid and issued", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "This permit has already been paid and issued",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (invoice.status === "cancelled") {
-      return sendError(res, "Cannot collect funds against a cancelled invoice ledger", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "Cannot collect funds against a cancelled invoice ledger",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const paymentAmount = Number(amount);
@@ -439,7 +494,7 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
         `Collection value (₦${paymentAmount}) exceeds outstanding balance due (₦${balanceDue})`,
         "BAD_REQUEST",
         null,
-        400
+        400,
       );
     }
 
@@ -449,7 +504,6 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
 
     // 3. EXECUTE ATOMIC TRANSACTION CONTEXT
     const result = await prisma.$transaction(async (tx) => {
-      
       // A. Write standard transaction payment log
       const payment = await tx.payment.create({
         data: {
@@ -496,7 +550,7 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
         // Activate the document state instantly on the field
         updatedPermit = await tx.permit.update({
           where: { id: permitId },
-          data: { status: 'issued' },
+          data: { status: "issued" },
           include: {
             invoice: {
               include: {
@@ -512,7 +566,12 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
         });
       }
 
-      return { payment, invoice: updatedInvoice, receipt, permit: updatedPermit };
+      return {
+        payment,
+        invoice: updatedInvoice,
+        receipt,
+        permit: updatedPermit,
+      };
     });
 
     // 4. Trace Operations securely through background Audit Log chains
@@ -522,7 +581,13 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
         entity: "Payment",
         entityId: result.payment.id,
         userId: officerId,
-        details: { invoiceId: invoice.id, permitId, amount: paymentAmount, method, isFullPayment },
+        details: {
+          invoiceId: invoice.id,
+          permitId,
+          amount: paymentAmount,
+          method,
+          isFullPayment,
+        },
         ipAddress: getIp(req),
       },
     });
@@ -547,11 +612,13 @@ export const recordPayment = async (req: Request, res: Response, next: NextFunct
         invoice: result.invoice,
         receipt: result.receipt,
         permit: result.permit,
-        message: isFullPayment 
+        message: isFullPayment
           ? "Payment processed fully. Permit document is now active and issued."
           : `Partial collection logged. Balance outstanding: ₦${newBalanceDue}`,
       },
-      isFullPayment ? "Collection settled and permit issued." : "Partial settlement recorded."
+      isFullPayment
+        ? "Collection settled and permit issued."
+        : "Partial settlement recorded.",
     );
   } catch (err) {
     next(err);
@@ -682,21 +749,31 @@ export const issuePermit = async (
  * Field officer views permits in their assigned ward.
  * Scoped strictly to wardId on their user record.
  */
-export const getWardPermits = async (req: Request, res: Response, next: NextFunction) => {
+export const getWardPermits = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const officerId = req.user!.id;
-    const search    = queryString(req.query.search);
-    const status    = queryString(req.query.status);
+    const search = queryString(req.query.search);
+    const status = queryString(req.query.status);
 
     // Get officer's assigned ward
     const officer = await prisma.user.findUnique({
       where: { id: officerId },
       // select: { wardId: true },
-      include:{ward:true}
+      include: { ward: true },
     });
 
     if (!officer?.ward.id) {
-      return sendError(res, 'No ward assigned to your account', 'BAD_REQUEST', null, 400);
+      return sendError(
+        res,
+        "No ward assigned to your account",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const where: any = {
@@ -706,36 +783,47 @@ export const getWardPermits = async (req: Request, res: Response, next: NextFunc
     if (status) where.status = status;
     if (search) {
       where.OR = [
-        { business: { businessName: { contains: search, mode: 'insensitive' } } },
-        { business: { ownerName:    { contains: search, mode: 'insensitive' } } },
-        { permitNumber: { contains: search, mode: 'insensitive' } },
+        {
+          business: { businessName: { contains: search, mode: "insensitive" } },
+        },
+        { business: { ownerName: { contains: search, mode: "insensitive" } } },
+        { permitNumber: { contains: search, mode: "insensitive" } },
       ];
     }
 
     const [permits, dailyCollections, inspectedCount] = await Promise.all([
-
       prisma.permit.findMany({
         where,
         include: {
           business: {
             select: {
-              id: true, businessName: true, ownerName: true,
-              phone: true, address: true, category: true,
+              id: true,
+              businessName: true,
+              ownerName: true,
+              phone: true,
+              address: true,
+              category: true,
             },
           },
           invoice: {
-            select: { id: true, invoiceNumber: true, status: true, balanceDue: true, totalAmount: true },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              status: true,
+              balanceDue: true,
+              totalAmount: true,
+            },
           },
           config: { select: { baseAmount: true, name: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
       }),
 
       // Daily collections — payments confirmed today by this officer
       prisma.payment.aggregate({
         where: {
           confirmedById: officerId,
-          status: 'confirmed',
+          status: "confirmed",
           createdAt: {
             gte: new Date(new Date().setHours(0, 0, 0, 0)),
           },
@@ -754,32 +842,32 @@ export const getWardPermits = async (req: Request, res: Response, next: NextFunc
 
     // Shape to match UI fields exactly
     const shaped = permits.map((p) => {
-      const isSettled  = ['issued'].includes(p.status);
+      const isSettled = ["issued"].includes(p.status);
       const outstanding = isSettled
         ? 0
         : Number(p.invoice?.balanceDue ?? p.config?.baseAmount ?? 0);
 
       return {
-        id:           p.id,
+        id: p.id,
         permitNumber: p.permitNumber,
-        status:       p.status,
-        validFrom:    p.validFrom,
-        validTo:      p.validTo,
+        status: p.status,
+        validFrom: p.validFrom,
+        validTo: p.validTo,
         outstanding,
         // Business info — UI reads these directly
         businessName: p.business.businessName,
-        ownerName:    p.business.ownerName,
-        phone:        p.business.phone,
-        address:      p.business.address,
-        category:     p.business.category,
-        businessId:   p.business.id,
+        ownerName: p.business.ownerName,
+        phone: p.business.phone,
+        address: p.business.address,
+        category: p.business.category,
+        businessId: p.business.id,
         // Invoice for pay now link
-        invoiceId:        p.invoice?.id ?? null,
-        invoiceNumber:    p.invoice?.invoiceNumber ?? null,
-        invoiceStatus:    p.invoice?.status ?? null,
+        invoiceId: p.invoice?.id ?? null,
+        invoiceNumber: p.invoice?.invoiceNumber ?? null,
+        invoiceStatus: p.invoice?.status ?? null,
         // Config
-        fee:          Number(p.config?.baseAmount ?? 0),
-        permitType:   p.config?.name ?? '—',
+        fee: Number(p.config?.baseAmount ?? 0),
+        permitType: p.config?.name ?? "—",
       };
     });
 
@@ -787,12 +875,14 @@ export const getWardPermits = async (req: Request, res: Response, next: NextFunc
       permits: shaped,
       stats: {
         dailyCollections: Number(dailyCollections._sum.amount ?? 0),
-        inspectedShops:   inspectedCount,
-        wardId:           officer.ward.id,
-        wardName: officer.ward.name
+        inspectedShops: inspectedCount,
+        wardId: officer.ward.id,
+        wardName: officer.ward.name,
       },
     });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 /**
@@ -800,21 +890,26 @@ export const getWardPermits = async (req: Request, res: Response, next: NextFunc
  * Field officer issues a demand notice (invoice) for an unpaid permit.
  * Only allowed if permit has no active unpaid invoice.
  */
-export const issueDemandNotice = async (req: Request, res: Response, next: NextFunction) => {
+export const issueDemandNotice = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const { permitId } = req.params;
-    const officerId    = req.user!.id;
+    const officerId = req.user!.id;
 
     const permit = await prisma.permit.findUnique({
       where: { id: String(permitId) },
       include: {
         business: { select: { id: true, businessName: true, wardId: true } },
-        invoice:  { select: { id: true, status: true } },
-        config:   { select: { baseAmount: true, categoryId: true } },
+        invoice: { select: { id: true, status: true } },
+        config: { select: { baseAmount: true, categoryId: true } },
       },
     });
 
-    if (!permit) return sendError(res, 'Permit not found', 'NOT_FOUND', null, 404);
+    if (!permit)
+      return sendError(res, "Permit not found", "NOT_FOUND", null, 404);
 
     // Verify officer is in the same ward
     const officer = await prisma.user.findUnique({
@@ -823,134 +918,190 @@ export const issueDemandNotice = async (req: Request, res: Response, next: NextF
     });
 
     if (officer?.wardId !== permit.business.wardId) {
-      return sendError(res, 'This permit is not in your assigned ward', 'FORBIDDEN', null, 403);
+      return sendError(
+        res,
+        "This permit is not in your assigned ward",
+        "FORBIDDEN",
+        null,
+        403,
+      );
     }
 
-    if (permit.status === 'issued') {
-      return sendError(res, 'Permit is already active — no demand notice needed', 'BAD_REQUEST', null, 400);
+    if (permit.status === "issued") {
+      return sendError(
+        res,
+        "Permit is already active — no demand notice needed",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     // Block if already has an unpaid invoice
-    if (permit.invoice && ['sent', 'partially_paid', 'overdue'].includes(permit.invoice.status)) {
+    if (
+      permit.invoice &&
+      ["sent", "partially_paid", "overdue"].includes(permit.invoice.status)
+    ) {
       return sendError(
         res,
-        'An unpaid invoice already exists for this permit',
-        'CONFLICT',
+        "An unpaid invoice already exists for this permit",
+        "CONFLICT",
         null,
-        409
+        409,
       );
     }
 
     const amount = Number(permit.config?.baseAmount ?? 0);
     if (amount === 0) {
-      return sendError(res, 'No pricing configured for this permit type', 'BAD_REQUEST', null, 400);
+      return sendError(
+        res,
+        "No pricing configured for this permit type",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     // Create invoice
     const invoice = await prisma.invoice.create({
       data: {
-        categoryId:        permit.config!.categoryId,
-        description:       `Demand Notice — ${permit.business.businessName} — ${permit.permitNumber}`,
-        subtotal:          amount,
-        totalAmount:       amount,
-        balanceDue:        amount,
-        status:            'sent',
-        createdById:       officerId,
+        categoryId: permit.config!.categoryId,
+        description: `Demand Notice — ${permit.business.businessName} — ${permit.permitNumber}`,
+        subtotal: amount,
+        totalAmount: amount,
+        balanceDue: amount,
+        status: "sent",
+        createdById: officerId,
         assignedOfficerId: officerId,
-        businessId:        permit.business.id,
-        dueDate:           new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        businessId: permit.business.id,
+        dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
       },
     });
 
     // Link invoice to permit
     await prisma.permit.update({
       where: { id: String(permitId) },
-      data:  { invoiceId: invoice.id },
+      data: { invoiceId: invoice.id },
     });
 
     await prisma.auditLog.create({
       data: {
-        action:   'invoice_created',
-        entity:   'Invoice',
+        action: "invoice_created",
+        entity: "Invoice",
         entityId: invoice.id,
-        userId:   officerId,
-        details:  { type: 'demand_notice', permitId, businessId: permit.business.id },
+        userId: officerId,
+        details: {
+          type: "demand_notice",
+          permitId,
+          businessId: permit.business.id,
+        },
         ipAddress: getIp(req),
       },
     });
 
-    return sendSuccess(res, { invoice, permit: permitId }, 'Demand notice issued', 201);
-  } catch (err) { next(err); }
+    return sendSuccess(
+      res,
+      { invoice, permit: permitId },
+      "Demand notice issued",
+      201,
+    );
+  } catch (err) {
+    next(err);
+  }
 };
 
 /**
  * POST /api/v1/operations/field/violations
  * Field officer logs a business violation or unregistered business.
  */
-export const logViolation = async (req: Request, res: Response, next: NextFunction) => {
+export const logViolation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const officerId = req.user!.id;
     const {
-      businessId,    // optional — if business already registered
-      businessName,  // required if businessId not provided
-      address,       // required if businessId not provided
+      businessId, // optional — if business already registered
+      businessName, // required if businessId not provided
+      address, // required if businessId not provided
       wardId,
       description,
-      severity = 'minor',
+      severity = "minor",
     } = req.body;
 
     if (!description) {
-      return sendError(res, 'Description is required', 'BAD_REQUEST', null, 400);
+      return sendError(
+        res,
+        "Description is required",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     if (!businessId && !businessName) {
-      return sendError(res, 'Either businessId or businessName is required', 'BAD_REQUEST', null, 400);
+      return sendError(
+        res,
+        "Either businessId or businessName is required",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     // Verify ward
     const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-    if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
+    if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
 
     // If businessId provided, verify it exists
     if (businessId) {
-      const biz = await prisma.business.findUnique({ where: { id: businessId } });
-      if (!biz) return sendError(res, 'Business not found', 'NOT_FOUND', null, 404);
+      const biz = await prisma.business.findUnique({
+        where: { id: businessId },
+      });
+      if (!biz)
+        return sendError(res, "Business not found", "NOT_FOUND", null, 404);
     }
 
     const violation = await prisma.violation.create({
       data: {
-        businessId:   businessId ?? null,
+        businessId: businessId ?? null,
         businessName: businessId ? null : businessName,
-        address:      businessId ? null : address,
+        address: businessId ? null : address,
         wardId,
         description,
         severity,
-        status:      'open',
-        loggedById:  officerId,
+        status: "open",
+        loggedById: officerId,
       },
       include: {
         business: { select: { businessName: true, address: true } },
-        ward:     { select: { name: true } },
+        ward: { select: { name: true } },
         loggedBy: { select: { firstName: true, lastName: true } },
       },
     });
 
     await prisma.auditLog.create({
       data: {
-        action:   'complaint_raised', // closest existing action
-        entity:   'Violation',
+        action: "complaint_raised", // closest existing action
+        entity: "Violation",
         entityId: violation.id,
-        userId:   officerId,
-        details:  { severity, businessName: businessId ? violation.business?.businessName : businessName },
+        userId: officerId,
+        details: {
+          severity,
+          businessName: businessId
+            ? violation.business?.businessName
+            : businessName,
+        },
         ipAddress: getIp(req),
       },
     });
 
-    return sendSuccess(res, violation, 'Violation logged successfully', 201);
-  } catch (err) { next(err); }
+    return sendSuccess(res, violation, "Violation logged successfully", 201);
+  } catch (err) {
+    next(err);
+  }
 };
-
-
 
 // ─────────────────────────────────────────────────────────────
 // RECEIPT VERIFICATION
@@ -988,12 +1139,11 @@ export const verifyReceipt = async (
             business: {
               select: { businessName: true, ownerName: true, address: true },
             },
-            category:true,
-            payments:true
+            category: true,
+            payments: true,
           },
         },
         issuedBy: { select: { id: true, firstName: true, lastName: true } },
-        
       },
     });
 
@@ -1022,7 +1172,7 @@ export const verifyReceipt = async (
       valid: true,
       receiptNumber: receipt.receiptNumber,
       amountPaid: receipt.amountPaid,
-      levyType:receipt.invoice.category.name,
+      levyType: receipt.invoice.category.name,
       issuedAt: receipt.issuedAt,
       issuedBy: `${receipt.issuedBy.firstName} ${receipt.issuedBy.lastName}`,
       business: receipt.invoice.business

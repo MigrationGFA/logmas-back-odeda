@@ -215,6 +215,7 @@ model User {
 
   // Document system relationships
   violationsLogged Violation[] @relation("ViolationLoggedBy")
+  assignedApplications StateOfOriginApplication[] @relation("ApplicationAssignedCouncillor")
   stateOfOriginApplications StateOfOriginApplication[]
   businesses                Business[]
   invoicesCreated           Invoice[]                  @relation("InvoiceCreatedBy")
@@ -284,8 +285,8 @@ model StateOfOriginApplication {
   applicantId String
   applicant   User   @relation(fields: [applicantId], references: [id])
 
-  wardId String
-  ward   Ward   @relation(fields: [wardId], references: [id])
+  wardId String?
+  ward   Ward?   @relation(fields: [wardId], references: [id])
 
   // Review trail
   reviewedByAdminId String?
@@ -297,6 +298,10 @@ model StateOfOriginApplication {
   councillorNotes        String?
 
   rejectionReason String?
+
+   assignedCouncillorId String?
+  assignedCouncillor   User?   @relation("ApplicationAssignedCouncillor", fields: [assignedCouncillorId], references: [id])
+
 
   // Certificate (generated on approval)
   certificate Certificate?

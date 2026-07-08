@@ -504,7 +504,7 @@ export const recordInvoicePayment = async (
     const result = await prisma.$transaction(async (tx) => {
       const payment = await tx.payment.create({
         data: {
-          invoiceId: String(id),
+          invoice: { connect: { id: invoice.id } },
           amount: paymentAmount,
           method: method as PaymentMethod,
           status: "confirmed",
@@ -512,7 +512,7 @@ export const recordInvoicePayment = async (
           narration,
           confirmedAt: new Date(),
           confirmedById: userId,
-          paidById: invoice.createdById,
+          paidBy: { connect: { id: invoice.createdById } },
         },
       });
 
@@ -534,8 +534,8 @@ export const recordInvoicePayment = async (
             verificationCode: generateVerificationCode(),
             qrToken: generateQrToken(),
             amountPaid: newAmountPaid,
-            invoiceId: String(id),
-            issuedById: userId,
+            invoice: { connect: { id: invoice.id } },
+            issuedBy: { connect: { id: userId } },
           },
         });
       }
@@ -545,17 +545,17 @@ export const recordInvoicePayment = async (
 
     await prisma.auditLog.create({
       data: {
-        action: "payment_confirmed",
-        entity: "Payment",
-        entityId: result.payment.id,
-        userId,
-        details: {
-          invoiceId: id,
-          amount: paymentAmount,
-          method,
-          isFullPayment,
-        },
-        ipAddress: getIp(req),
+      action: "payment_confirmed",
+      entity: "Payment",
+      entityId: result.payment.id,
+      user: { connect: { id: userId } },
+      details: {
+        invoiceId: id,
+        amount: paymentAmount,
+        method,
+        isFullPayment,
+      },
+      ipAddress: getIp(req),
       },
     });
 

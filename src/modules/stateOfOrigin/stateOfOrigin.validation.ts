@@ -10,7 +10,7 @@ export const submitApplicationSchema = z.object({
   address: z.string().min(5, 'Address is required'),
   phone: z.string().min(10, 'Valid phone number is required'),
   email: z.string().email().optional(),
-  wardId: z.string().uuid('Invalid ward ID'),
+  // wardId: z.string().uuid('Invalid ward ID'),
   purpose: z.string().min(3).optional(),
   nin: z.string().optional(),
   passportUrl: z.string().url().optional(),
@@ -18,6 +18,7 @@ export const submitApplicationSchema = z.object({
 
 export const reviewApplicationSchema = z.object({
   reviewNotes: z.string().optional(),
+   councillorId: z.string().uuid().optional(),
 });
 
 export const councillorDecisionSchema = z.object({

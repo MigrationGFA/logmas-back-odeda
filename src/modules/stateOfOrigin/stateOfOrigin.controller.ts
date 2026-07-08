@@ -4,6 +4,7 @@ import { prisma } from '../../utils/prisma';
 import { sendSuccess, sendError } from '../../utils/response';
 import { generateReceiptNumber, generateVerificationCode, generateQrToken } from '../../utils/generators';
 import { ApplicationStatus } from '@prisma/client';
+import { getIp, queryString } from '../complaints/complaints.controller';
 
 // ─────────────────────────────────────────────────────────────
 // CITIZEN
@@ -41,8 +42,8 @@ export const submitApplication = async (req: Request, res: Response, next: NextF
     // }
 
     // Verify ward exists
-    const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-    if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
+    // const ward = await prisma.ward.findUnique({ where: { id: wardId } });
+    // if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
 
    const stateOfOriginCategory = await prisma.revenueCategory.findUnique({
   where: { slug: 'state_of_origin_fee' },
@@ -72,11 +73,11 @@ const levyConfig = await prisma.levyConfig.findFirst({
           address,
           phone,
           email,
-          wardId,
+          // wardId,
           purpose,
           nin,
           passportUrl,
-          applicantId: citizenId,
+          applicant: { connect: { id: citizenId } },
           status: 'submitted',
         },
       });
@@ -133,9 +134,10 @@ export const getMyApplications = async (req: Request, res: Response, next: NextF
     const applications = await prisma.stateOfOriginApplication.findMany({
       where: { applicantId: citizenId },
       include: {
-        ward: { select: { id: true, name: true, code: true } },
+        // ward: { select: { id: true, name: true, code: true } },
         invoice: { select: { id: true, status: true, totalAmount: true, balanceDue: true } },
         certificate: { select: { id: true, certificateNumber: true, issuedAt: true } },
+        assignedCouncillor: { select: { id: true, firstName: true, lastName: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -179,23 +181,47 @@ export const getMyApplicationById = async (req: Request, res: Response, next: Ne
  */
 export const getAllApplications = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { page = 1, limit = 10, status, wardId } = req.query as any;
-    const skip = (Number(page) - 1) * Number(limit);
+    const status     = queryString(req.query.status);
+    const wardId     = queryString(req.query.wardId);
+    const search     = queryString(req.query.search);
+    const page       = parseInt(queryString(req.query.page)  ?? '1');
+    const limit      = parseInt(queryString(req.query.limit) ?? '10');
+    const skip       = (page - 1) * limit;
 
     const where: any = {};
+
     if (status) where.status = status;
     if (wardId) where.wardId = wardId;
+
+    // Search by applicant name or application number
+    if (search) {
+      where.OR = [
+        { fullName:      { contains: search, mode: 'insensitive' } },
+        { applicationNo: { contains: search, mode: 'insensitive' } },
+        { phone:         { contains: search } },
+      ];
+    }
 
     const [applications, total] = await Promise.all([
       prisma.stateOfOriginApplication.findMany({
         where,
         skip,
-        take: Number(limit),
+        take: limit,
         include: {
-          applicant: { select: { id: true, firstName: true, lastName: true, email: true } },
+          applicant: {
+            select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+          },
           ward: { select: { id: true, name: true, code: true } },
-          invoice: { select: { id: true, status: true, totalAmount: true } },
-          certificate: { select: { id: true, certificateNumber: true,issuedAt:true } },
+          invoice: {
+            select: { id: true, invoiceNumber: true, status: true, totalAmount: true, balanceDue: true },
+          },
+          certificate: {
+            select: { id: true, certificateNumber: true, issuedAt: true },
+          },
+          // Include assigned councillor so admin can see who it's been forwarded to
+          assignedCouncillor: {
+            select: { id: true, firstName: true, lastName: true, assignedWard: { select: { name: true } } },
+          },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -204,7 +230,12 @@ export const getAllApplications = async (req: Request, res: Response, next: Next
 
     return sendSuccess(res, {
       data: applications,
-      meta: { total, page: Number(page), limit: Number(limit), totalPages: Math.ceil(total / Number(limit)) },
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (err) { next(err); }
 };
@@ -239,52 +270,88 @@ export const getApplicationById = async (req: Request, res: Response, next: Next
  * LGA Admin reviews and forwards to Ward Councillor.
  * Only allowed if application is in 'paid' status.
  */
+// PATCH /api/v1/state-of-origin/admin/:id/forward
 export const forwardToCouncillor = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let { id } = req.params;
-    if (Array.isArray(id)) id = id[0];
-    const adminId = req.user!.id;
-    const { reviewNotes } = req.body;
+    const { id }    = req.params;
+    const adminId   = req.user!.id;
+    const { reviewNotes, councillorId } = req.body; // councillorId is now optional
 
     const application = await prisma.stateOfOriginApplication.findUnique({
-      where: { id },
-      include: { invoice: true },
+      where: { id: String(id) },
+      include: { invoice: true, ward: true },
     });
 
     if (!application) return sendError(res, 'Application not found', 'NOT_FOUND', null, 404);
 
     if (application.status !== 'paid') {
-      return sendError(
-        res,
-        'Only paid applications can be forwarded for approval',
-        'BAD_REQUEST',
-        null,
-        400
-      );
+      return sendError(res, 'Only paid applications can be forwarded', 'BAD_REQUEST', null, 400);
+    }
+
+    // If LGA Admin specified a councillor — use them
+    // If not — fall back to ward-based routing
+    let targetCouncillorId: string | null = null;    
+
+    if (councillorId) {
+      // Validate the specified councillor exists and has the right role
+      const councillor = await prisma.user.findUnique({
+        where: { id: councillorId },
+        select: { id: true, role: true, isActive: true, firstName: true, lastName: true },
+      });
+
+      if (!councillor || councillor.role !== 'ward_councillor') {
+        return sendError(res, 'Specified user is not a ward councillor', 'BAD_REQUEST', null, 400);
+      }
+      if (!councillor.isActive) {
+        return sendError(res, 'This councillor account is inactive', 'BAD_REQUEST', null, 400);
+      }
+
+      targetCouncillorId = councillorId;
+    } else {
+      // Fall back: find councillor assigned to the application's ward
+      const wardCouncillor = await prisma.user.findFirst({
+        where: {
+          role:          'ward_councillor',
+          assignedWardId: application.wardId,
+          isActive:      true,
+        },
+        select: { id: true },
+      });
+
+      // Ward councillor not found is a soft warning — not a hard block
+      // LGA Admin can still forward and assign later
+      targetCouncillorId = wardCouncillor?.id ?? null;
     }
 
     const updated = await prisma.stateOfOriginApplication.update({
-      where: { id },
+      where: { id:String(id) },
       data: {
-        status: 'forwarded_to_councillor',
-        reviewedByAdminId: adminId,
-        reviewedByAdminAt: new Date(),
+        status:                 'forwarded_to_councillor',
+        reviewedByAdminId:      adminId,
+        reviewedByAdminAt:      new Date(),
         reviewNotes,
+        assignedCouncillorId:   targetCouncillorId, // can be null if no councillor found
       },
     });
 
     await prisma.auditLog.create({
       data: {
-        action: 'application_submitted', // reusing closest action; extend enum if needed
-        entity: 'StateOfOriginApplication',
-        entityId: id,
-        userId: adminId,
-        details: { action: 'forwarded_to_councillor', reviewNotes },
-        ipAddress: req.ip,
+        action:   'application_submitted',
+        entity:   'StateOfOriginApplication',
+        entityId:  String(id),
+        userId:   adminId,
+        details:  {
+          action:              'forwarded_to_councillor',
+          reviewNotes,
+          assignedCouncillorId: targetCouncillorId,
+          routingMode:         councillorId ? 'manual' : 'ward_based',
+        },
+        ipAddress: getIp(req),
       },
     });
 
-    // TODO: Notify ward councillor via notification system
+    // TODO Phase 7: Notify assigned councillor
+
     return sendSuccess(res, updated, 'Application forwarded to Ward Councillor');
   } catch (err) { next(err); }
 };
@@ -297,34 +364,43 @@ export const forwardToCouncillor = async (req: Request, res: Response, next: Nex
  * GET /api/v1/state-of-origin/councillor/queue
  * Ward Councillor sees only their ward's pending applications.
  */
+// GET /api/v1/state-of-origin/councillor/queue
 export const getCouncillorQueue = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const councillorId = req.user!.id;
 
-    // Get councillor's assigned ward
     const councillor = await prisma.user.findUnique({
       where: { id: councillorId },
-      select: { wardId: true },
+      select: { assignedWardId: true },
     });
 
-    if (!councillor?.wardId) {
-      return sendError(res, 'No ward assigned to this councillor', 'BAD_REQUEST', null, 400);
-    }
-
+    // Fetch applications where:
+    // Option A — explicitly assigned to this councillor (new flow)
+    // Option B — ward matches councillor's assigned ward (old flow fallback)
     const applications = await prisma.stateOfOriginApplication.findMany({
       where: {
-        wardId: councillor.wardId,
         status: 'forwarded_to_councillor',
+        OR: [
+          { assignedCouncillorId: councillorId },           // manually assigned
+          {                                                  // ward-based fallback
+            assignedCouncillorId: null,
+            wardId: councillor?.assignedWardId ?? 'NO_WARD',
+          },
+        ],
       },
       include: {
         applicant: { select: { id: true, firstName: true, lastName: true, email: true } },
-        ward: { select: { id: true, name: true } },
-        invoice: { select: { id: true, status: true, totalAmount: true } },
+        ward:      { select: { id: true, name: true } },
+        invoice:   { select: { id: true, status: true, totalAmount: true } },
+          assignedCouncillor: {
+            select: { id: true, firstName: true, lastName: true, assignedWard: { select: { name: true } } },
+          },
       },
-      orderBy: { createdAt: 'asc' }, // oldest first — process in order
+      orderBy: { createdAt: 'asc' },
     });
 
-    return sendSuccess(res, {data:applications});
+    // return sendSuccess(res, applications);
+    return res.status(200).json(applications);
   } catch (err) { next(err); }
 };
 
@@ -352,11 +428,11 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
     if (!application) return sendError(res, 'Application not found', 'NOT_FOUND', null, 404);
 
     // Councillor can only decide on their own ward's applications
-    if (application.wardId !== councillor?.wardId) {
-      return sendError(res, 'This application does not belong to your ward', 'FORBIDDEN', null, 403);
-    }
+    // if (application.wardId !== councillor?.wardId) {
+    //   return sendError(res, 'This application does not belong to your ward', 'FORBIDDEN', null, 403);
+    // }
 
-    if (application.status !== 'forwarded_to_councillor') {
+    if (application.status !== ApplicationStatus.forwarded_to_councillor) {
       return sendError(res, 'Application is not pending councillor decision', 'BAD_REQUEST', null, 400);
     }
 
@@ -365,7 +441,7 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
       const updated = await prisma.stateOfOriginApplication.update({
         where: { id },
         data: {
-          status: 'rejected',
+          status: ApplicationStatus.rejected,
           approvedByCouncillorId: councillorId,
           approvedByCouncillorAt: new Date(),
           councillorNotes,
@@ -395,7 +471,7 @@ export const decideonApplication = async (req: Request, res: Response, next: Nex
       const updatedApplication = await tx.stateOfOriginApplication.update({
         where: { id },
         data: {
-          status: 'approved', 
+          status: ApplicationStatus.approved,
           approvedByCouncillorId: councillorId,
           approvedByCouncillorAt: new Date(),
           councillorNotes,

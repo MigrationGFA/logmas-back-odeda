@@ -87,6 +87,7 @@ export const listWards = async (
               lastName: true,
               email: true,
               isActive: true,
+              phone:true
             },
           },
           _count: {
@@ -524,15 +525,15 @@ export const getStaffById = async (
         contractor: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
-        fieldOfficers: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            isActive: true,
-          },
-        },
+        // fieldOfficers: {
+        //   select: {
+        //     id: true,
+        //     firstName: true,
+        //     lastName: true,
+        //     email: true,
+        //     isActive: true,
+        //   },
+        // },
         createdAt: true,
         lastLoginAt: true,
       },

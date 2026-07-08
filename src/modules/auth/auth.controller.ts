@@ -90,7 +90,7 @@ export const login = async (
       where: { email, deletedAt: null },
     });
 
-    console.log(user, "⛔");
+    // console.log(user, "⛔");
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return sendError(
         res,

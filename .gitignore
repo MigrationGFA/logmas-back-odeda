@@ -5,3 +5,4 @@ node_modules
 /src/generated/prisma
 /src/modules/uploads/uploads.route copy.ts
 dist
+# /public/uploads/*

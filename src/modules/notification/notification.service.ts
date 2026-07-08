@@ -1,0 +1,128 @@
+// src/notifications/notification.service.ts
+//
+// Orchestrates: resolve template -> interpolate -> send via sms/email -> log to Notification table.
+//
+// ASSUMPTIONS TO VERIFY AGAINST YOUR SCHEMA:
+// - `NotificationChannel` enum has values matching "sms" | "email" (adjust CHANNEL below if not)
+// - `NotificationStatus` enum has values matching "pending" | "sent" | "failed" (adjust STATUS below if not)
+// - Prisma client is importable from "../lib/prisma" (a common convention) — change this import
+//   to wherever your `prisma` singleton actually lives.
+
+import { interpolate, NotificationTemplates, TemplateVars } from "../../config/notification.template";
+import { prisma } from "../../utils/prisma";
+import { sendEmail } from "./email.service";
+import { sendSms } from "./sms.service";
+
+
+// If your generated Prisma enums differ in casing, import and use those instead of these string unions.
+type Channel = "sms" | "email";
+type Status = "pending" | "sent" | "failed";
+
+interface NotifyParams {
+  userId: string;
+  to: { phone?: string; email?: string };
+  templateKey: string; // dot path, e.g. "soo.invoiceGenerated" or "account.passwordReset"
+  vars: TemplateVars;
+  channels: Channel[]; // which channels to actually send on for this call
+}
+
+interface ResolvedTemplate {
+  sms?: string;
+  emailSubject?: string;
+  emailHtml?: string;
+}
+
+// Walks a dot-path like "soo.invoiceGenerated" against NotificationTemplates
+function resolveTemplate(templateKey: string): ResolvedTemplate {
+  const parts = templateKey.split(".");
+  let node: any = NotificationTemplates;
+  for (const part of parts) {
+    node = node?.[part];
+  }
+  if (!node) {
+    throw new Error(`Template not found for key "${templateKey}"`);
+  }
+  return node as ResolvedTemplate;
+}
+
+/**
+ * Send a notification across one or more channels using a template, and log each attempt.
+ * Returns per-channel results so the caller can see what succeeded/failed.
+ */
+export async function notify({ userId, to, templateKey, vars, channels }: NotifyParams) {
+  const template = resolveTemplate(templateKey);
+  const results: Record<string, { success: boolean; error?: string }> = {};
+
+  for (const channel of channels) {
+    if (channel === "sms") {
+      if (!template.sms) {
+        results.sms = { success: false, error: `No sms template for "${templateKey}"` };
+        continue;
+      }
+      if (!to.phone) {
+        results.sms = { success: false, error: "No phone number provided" };
+        continue;
+      }
+
+      const message = interpolate(template.sms, vars);
+
+      // Log as pending first so you have a record even if the process crashes mid-send
+      const record = await prisma.notification.create({
+        data: {
+          channel: "sms" as any, // TODO: replace with your Prisma enum, e.g. NotificationChannel.sms
+          status: "pending" as any, // TODO: replace with NotificationStatus.pending
+          message,
+          userId,
+        },
+      });
+
+      const result = await sendSms({ to: to.phone, message });
+
+      await prisma.notification.update({
+        where: { id: record.id },
+        data: result.success
+          ? { status: "sent" as any, sentAt: new Date() }
+          : { status: "failed" as any, failReason: result.error },
+      });
+
+      results.sms = { success: result.success, error: result.error };
+    }
+
+    if (channel === "email") {
+      if (!template.emailHtml || !template.emailSubject) {
+        results.email = { success: false, error: `No email template for "${templateKey}"` };
+        continue;
+      }
+      if (!to.email) {
+        results.email = { success: false, error: "No email address provided" };
+        continue;
+      }
+
+      const subject = interpolate(template.emailSubject, vars);
+      const html = interpolate(template.emailHtml, vars);
+
+      const record = await prisma.notification.create({
+        data: {
+          channel: "email" as any, // TODO: replace with NotificationChannel.email
+          status: "pending" as any, // TODO: replace with NotificationStatus.pending
+          subject,
+          message: html,
+          userId,
+        },
+      });
+
+      const result = await sendEmail({ to: to.email, subject, html });
+
+      await prisma.notification.update({
+        where: { id: record.id },
+        data: result.success
+          ? { status: "sent" as any, sentAt: new Date() }
+          : { status: "failed" as any, failReason: result.error },
+      });
+
+      results.email = { success: result.success, error: result.error };
+    }
+  }
+
+  return results;
+}

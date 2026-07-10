@@ -8,6 +8,7 @@
 // - Prisma client is importable from "../lib/prisma" (a common convention) — change this import
 //   to wherever your `prisma` singleton actually lives.
 
+import { NotificationChannel, NotificationStatus } from "@prisma/client";
 import { interpolate, NotificationTemplates, TemplateVars } from "../../config/notification.template";
 import { prisma } from "../../utils/prisma";
 import { sendEmail } from "./email.service";
@@ -69,8 +70,8 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
       // Log as pending first so you have a record even if the process crashes mid-send
       const record = await prisma.notification.create({
         data: {
-          channel: "sms" as any, // TODO: replace with your Prisma enum, e.g. NotificationChannel.sms
-          status: "pending" as any, // TODO: replace with NotificationStatus.pending
+          channel: NotificationChannel.sms as any, // TODO: replace with your Prisma enum, e.g. NotificationChannel.sms
+          status: NotificationStatus.pending as any, // TODO: replace with NotificationStatus.pending
           message,
           userId,
         },
@@ -103,8 +104,8 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
 
       const record = await prisma.notification.create({
         data: {
-          channel: "email" as any, // TODO: replace with NotificationChannel.email
-          status: "pending" as any, // TODO: replace with NotificationStatus.pending
+          channel: NotificationChannel.email, // TODO: replace with NotificationChannel.email
+          status: NotificationStatus.pending, // TODO: replace with NotificationStatus.pending
           subject,
           message: html,
           userId,

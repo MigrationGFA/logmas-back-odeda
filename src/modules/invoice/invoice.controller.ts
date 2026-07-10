@@ -9,6 +9,7 @@ import {
   generateVerificationCode,
 } from "../../utils/generators";
 import { getIp } from "../complaints/complaints.controller";
+import { confirmPayment } from "../payment/payment.service";
 
 interface GetInvoicesQuery {
   role: Role;
@@ -426,6 +427,7 @@ export const getInvoiceById = async (
 };
 
 // POST /api/v1/invoices/:id/pay
+
 export const recordInvoicePayment = async (
   req: Request,
   res: Response,
@@ -453,38 +455,7 @@ export const recordInvoicePayment = async (
       );
     }
 
-    // ── ONLINE / VIRTUAL ACCOUNT ────────────────────────────
-    if (
-      method === "online" ||
-      method === "virtual_account" ||
-      method === "bank_transfer"
-    ) {
-      // TODO Phase 7: Initialize Paystack/Flutterwave payment here
-      // const gatewayResponse = await paystackService.initializeTransaction({
-      //   amount: Number(invoice.balanceDue) * 100, // kobo
-      //   email: req.user.email,
-      //   reference: generateReference('PAY'),
-      //   metadata: { invoiceId: id, userId },
-      // });
-      // return sendSuccess(res, {
-      //   paymentUrl: gatewayResponse.data.authorization_url,
-      //   reference:  gatewayResponse.data.reference,
-      //   message:    'Redirect user to paymentUrl to complete payment',
-      // });
-
-      // For now return a stub so the UI doesn't break
-      return sendSuccess(res, {
-        stub: true,
-        message:
-          "Online payment gateway not yet configured. Coming in Phase 7.",
-        paymentUrl: null,
-        // Simulate for dev — remove in production
-        simulateEndpoint: `/api/v1/invoices/${id}/simulate-payment`,
-      });
-    }
-
-    // ── CASH / POS ───────────────────────────────────────────
-    // Only field officers can record cash/POS
+    // Cash/POS only — online payments go through /pay-online now, not this route.
     if (!["field_officer", "lga_admin", "super_admin"].includes(role)) {
       return sendError(
         res,
@@ -496,66 +467,30 @@ export const recordInvoicePayment = async (
     }
 
     const paymentAmount = Number(amount ?? invoice.balanceDue);
-    const balanceDue = Number(invoice.balanceDue);
-    const isFullPayment = paymentAmount >= balanceDue;
-    const newAmountPaid = Number(invoice.amountPaid) + paymentAmount;
-    const newBalanceDue = balanceDue - paymentAmount;
 
-    const result = await prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.create({
-        data: {
-          invoice: { connect: { id: invoice.id } },
-          amount: paymentAmount,
-          method: method as PaymentMethod,
-          status: "confirmed",
-          reference: reference || generateReference("PAY"),
-          narration,
-          confirmedAt: new Date(),
-          confirmedById: userId,
-          paidBy: { connect: { id: invoice.createdById } },
-        },
-      });
-
-      const updatedInvoice = await tx.invoice.update({
-        where: { invoiceNumber: String(id) },
-        data: {
-          amountPaid: newAmountPaid,
-          balanceDue: newBalanceDue,
-          status: isFullPayment ? "paid" : "partially_paid",
-          paidAt: isFullPayment ? new Date() : null,
-        },
-      });
-
-      let receipt = null;
-      if (isFullPayment) {
-        receipt = await tx.receipt.create({
-          data: {
-            receiptNumber: generateReceiptNumber("RCP"),
-            verificationCode: generateVerificationCode(),
-            qrToken: generateQrToken(),
-            amountPaid: newAmountPaid,
-            invoice: { connect: { id: invoice.id } },
-            issuedBy: { connect: { id: userId } },
-          },
-        });
-      }
-
-      return { payment, invoice: updatedInvoice, receipt };
+    const result = await confirmPayment({
+      invoiceId: invoice.id,
+      amount: paymentAmount,
+      method,
+      reference,
+      narration,
+      paidById: invoice.createdById,
+      confirmedById: userId,
     });
 
     await prisma.auditLog.create({
       data: {
-      action: "payment_confirmed",
-      entity: "Payment",
-      entityId: result.payment.id,
-      user: { connect: { id: userId } },
-      details: {
-        invoiceId: id,
-        amount: paymentAmount,
-        method,
-        isFullPayment,
-      },
-      ipAddress: getIp(req),
+        action: "payment_confirmed",
+        entity: "Payment",
+        entityId: result.payment.id,
+        user: { connect: { id: userId } },
+        details: {
+          invoiceId: id,
+          amount: paymentAmount,
+          method,
+          isFullPayment: result.isFullPayment,
+        },
+        ipAddress: getIp(req),
       },
     });
 
@@ -565,12 +500,12 @@ export const recordInvoicePayment = async (
         payment: result.payment,
         invoice: result.invoice,
         receipt: result.receipt,
-        isFullPayment,
-        message: isFullPayment
+        isFullPayment: result.isFullPayment,
+        message: result.isFullPayment
           ? "Payment confirmed. Receipt generated."
-          : `Partial payment recorded. Balance due: ₦${newBalanceDue}`,
+          : `Partial payment recorded. Balance due: ₦${Number(result.invoice.balanceDue)}`,
       },
-      isFullPayment ? "Payment complete" : "Partial payment recorded",
+      result.isFullPayment ? "Payment complete" : "Partial payment recorded",
     );
   } catch (err) {
     next(err);

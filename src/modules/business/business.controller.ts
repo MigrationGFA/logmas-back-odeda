@@ -507,7 +507,9 @@ export const getMyPermits = async (
       invoice: p.invoice,
     }));
 
-    // console.log(formattedPermits,"formattedPermits❤️");
+    console.log(formattedPermits,"formattedPermits❤️");
+    // console.log('Formatted permits:', formattedPermits);
+console.log('Is array:', Array.isArray(formattedPermits));
 
     return sendSuccess(res, { data: formattedPermits });
   } catch (err) {

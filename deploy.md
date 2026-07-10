@@ -17,3 +17,6 @@ From https://github.com/MigrationGFA/logmas-backend
 
 
 dont forget to get token from developer settings fine token grain
+
+
+npx prisma db push

@@ -27,13 +27,13 @@ async function main() {
 //   });
 //   console.log(smsResult);
 
-  console.log("\n=== 3. Sending test plain email ===");
-  const emailResult = await sendEmail({
-    to: TEST_EMAIL,
-    subject: "Test email — backend wiring check",
-    html: "<p>If you're reading this, SMTP via cPanel is working.</p>",
-  });
-  console.log(emailResult);
+  // console.log("\n=== 3. Sending test plain email ===");
+  // const emailResult = await sendEmail({
+  //   to: TEST_EMAIL,
+  //   subject: "Test email — backend wiring check",
+  //   html: "<p>If you're reading this, SMTP via cPanel is working.</p>",
+  // });
+  // console.log(emailResult);
 
   console.log("\n=== 4. Sending a real template (soo.invoiceGenerated) to both channels ===");
   const template = NotificationTemplates.soo.invoiceGenerated;

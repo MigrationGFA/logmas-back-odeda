@@ -11,6 +11,7 @@ import { InvoiceStatus, RevenueCategory, Role } from "@prisma/client";
 import { getIp, queryString } from "../complaints/complaints.controller";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { notify } from "../notification/notification.service";
 
 // ─────────────────────────────────────────────────────────────
 // BUSINESS PROFILE
@@ -354,13 +355,28 @@ export const applyForPermit = async (
     }
 
     // 3. Block duplicates using the dynamic config tracker
+    const now = new Date();
+
     const activePermit = await prisma.permit.findFirst({
       where: {
         businessId,
         configId: permitConfig.id,
-        status: { in: ["pending_payment", "issued"] },
+        OR: [
+          // 1. A pending payment is always a blocking active state
+          { status: "pending_payment" },
+          {
+            status: "issued",
+            OR: [
+              // 2. An issued permit with no expiration date blocks
+              { validTo: null },
+              // 3. An issued permit that expires today or in the future blocks (unexpired)
+              { validTo: { gte: now } },
+            ],
+          },
+        ],
       },
     });
+
     if (activePermit) {
       return sendError(
         res,
@@ -427,6 +443,17 @@ export const applyForPermit = async (
         },
         ipAddress: getIp(req),
       },
+    });
+
+    await notify({
+      userId: actorId,
+      to: { email: req.user.email },
+      templateKey: "soo.invoiceGenerated",
+      vars: {
+        invoice_number: result.invoice?.id,
+        payment_amount: `₦${result.invoice?.totalAmount.toLocaleString()}`,
+      },
+      channels: ["sms", "email"],
     });
 
     const successMessage =
@@ -507,11 +534,7 @@ export const getMyPermits = async (
       invoice: p.invoice,
     }));
 
-    console.log(formattedPermits,"formattedPermits❤️");
-    // console.log('Formatted permits:', formattedPermits);
-console.log('Is array:', Array.isArray(formattedPermits));
-
-    return sendSuccess(res, { data: formattedPermits });
+    return sendSuccess(res, { permits: formattedPermits });
   } catch (err) {
     next(err);
   }
@@ -606,7 +629,13 @@ export const getMyPermitById = async (
           },
         },
         issuedBy: {
-          select: { id: true, firstName: true, lastName: true, role: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+            createdAt: true,
+          },
         },
         config: { select: { id: true, name: true } },
       },

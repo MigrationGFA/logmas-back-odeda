@@ -434,6 +434,7 @@ model Permit {
 
   issuedById String?
   issuedBy   User?   @relation("PermitIssuedBy", fields: [issuedById], references: [id])
+  issuedAt   DateTime?
 
   invoiceId String?  @unique
   invoice   Invoice? @relation(fields: [invoiceId], references: [id])

@@ -19,6 +19,11 @@ import { sendEmail } from "../notification/email.service";
 // POST /api/v1/invoices/:id/pay-online
 // Replaces the online-payment stub inside your existing recordInvoicePayment.
 // `:id` is the invoiceNumber, matching your existing convention.
+
+ const callbackUrl = process.env.NODE_ENV === "production"
+      ? `${process.env.PAYSTACK_CALLBACK_URL}/dashboard/payment/result`
+      : "http://localhost:3000/dashboard/payment/result";
+
 export const initializePaystackPayment = async (
   req: Request,
   res: Response,
@@ -52,7 +57,7 @@ export const initializePaystackPayment = async (
       email: userEmail,
       amountKobo,
       reference,
-      callbackUrl: process.env.PAYSTACK_CALLBACK_URL,
+      callbackUrl,
       metadata: {
         invoiceId: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -284,15 +289,17 @@ export const sendPaymentLinkToBusiness = async (
     const reference = generateReference("PAY");
     const amountKobo = Math.round(Number(invoice.balanceDue) * 100);
 
+   
+
     const gatewayResult = await initializeTransaction({
       email: recipientEmail,
       amountKobo,
       reference,
-      callbackUrl: process.env.PAYSTACK_CALLBACK_URL,
+      callbackUrl,
       metadata: {
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        businessId: business.id,
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      businessId: business.id,
       },
     });
 

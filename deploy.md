@@ -33,3 +33,5 @@ pkill -u getfjupm node
 
 
 npx prisma db push
+
+npx prisma migrate dev --name added_some

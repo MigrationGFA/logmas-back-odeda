@@ -8,12 +8,10 @@
 // - Prisma client is importable from "../lib/prisma" (a common convention) — change this import
 //   to wherever your `prisma` singleton actually lives.
 
-import { NotificationChannel, NotificationStatus } from "@prisma/client";
+import { sendSms } from "./sms.service";
+import { sendEmail } from "./email.service";
 import { interpolate, NotificationTemplates, TemplateVars } from "../../config/notification.template";
 import { prisma } from "../../utils/prisma";
-import { sendEmail } from "./email.service";
-import { sendSms } from "./sms.service";
-
 
 // If your generated Prisma enums differ in casing, import and use those instead of these string unions.
 type Channel = "sms" | "email";
@@ -46,6 +44,19 @@ function resolveTemplate(templateKey: string): ResolvedTemplate {
   return node as ResolvedTemplate;
 }
 
+// Termii (and other gateways) sometimes return error as an array of field/issue
+// objects rather than a string — failReason is a Prisma String column, so this
+// must always come out as a plain string no matter what shape went in.
+function stringifyError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error == null) return "Unknown error";
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 /**
  * Send a notification across one or more channels using a template, and log each attempt.
  * Returns per-channel results so the caller can see what succeeded/failed.
@@ -70,8 +81,8 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
       // Log as pending first so you have a record even if the process crashes mid-send
       const record = await prisma.notification.create({
         data: {
-          channel: NotificationChannel.sms as any, // TODO: replace with your Prisma enum, e.g. NotificationChannel.sms
-          status: NotificationStatus.pending as any, // TODO: replace with NotificationStatus.pending
+          channel: "sms" as any, // TODO: replace with your Prisma enum, e.g. NotificationChannel.sms
+          status: "pending" as any, // TODO: replace with NotificationStatus.pending
           message,
           userId,
         },
@@ -83,7 +94,7 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
         where: { id: record.id },
         data: result.success
           ? { status: "sent" as any, sentAt: new Date() }
-          : { status: "failed" as any, failReason: result.error },
+          : { status: "failed" as any, failReason: stringifyError(result.error) },
       });
 
       results.sms = { success: result.success, error: result.error };
@@ -104,8 +115,8 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
 
       const record = await prisma.notification.create({
         data: {
-          channel: NotificationChannel.email, // TODO: replace with NotificationChannel.email
-          status: NotificationStatus.pending, // TODO: replace with NotificationStatus.pending
+          channel: "email" as any, // TODO: replace with NotificationChannel.email
+          status: "pending" as any, // TODO: replace with NotificationStatus.pending
           subject,
           message: html,
           userId,
@@ -118,7 +129,7 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
         where: { id: record.id },
         data: result.success
           ? { status: "sent" as any, sentAt: new Date() }
-          : { status: "failed" as any, failReason: result.error },
+          : { status: "failed" as any, failReason: stringifyError(result.error) },
       });
 
       results.email = { success: result.success, error: result.error };

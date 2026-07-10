@@ -37,15 +37,15 @@ export const registerBusiness = async (
       cacNumber,
       category,
       description,
-      wardId,
+      // wardId,
     } = req.body;
 
-    const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-    if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
+    // const ward = await prisma.ward.findUnique({ where: { id: wardId } });
+    // if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
 
     // Check if a business with same name + phone already exists in this ward
     const duplicate = await prisma.business.findFirst({
-      where: { businessName, phone, wardId, isActive: true },
+      where: { businessName, phone, isActive: true },
     });
     if (duplicate) {
       return sendError(
@@ -70,7 +70,7 @@ export const registerBusiness = async (
         cacNumber,
         category,
         description,
-        wardId,
+        // wardId,
         ownerId: officerId, // field officer is the registrar/proxy owner in the system
       },
       include: { ward: { select: { id: true, name: true, code: true } } },

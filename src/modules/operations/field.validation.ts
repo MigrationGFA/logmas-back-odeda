@@ -12,7 +12,7 @@ export const registerBusinessSchema = z.object({
   cacNumber: z.string().optional(),
   category: z.string().min(2, 'Business category is required'),
   description: z.string().optional(),
-  wardId: z.string().uuid('Invalid ward ID'),
+  // wardId: z.string().uuid('Invalid ward ID'),
 });
 
 // ── Invoice Generation ────────────────────────────────────────
@@ -26,7 +26,7 @@ export const generateInvoiceSchema = z.object({
   businessName: z.string().min(1, 'Business name is required').optional(),
   ownerName: z.string().min(1, 'Owner name is required').optional(),
   phone: z.string().min(1, 'Phone number is required').optional(),
-  wardId: z.string().uuid('Invalid ward ID').optional(),
+  // wardId: z.string().uuid('Invalid ward ID').optional(),
   
   // Optional new business fields
   email: z.string().email('Invalid email format').optional().or(z.literal('')),

@@ -141,19 +141,25 @@ export const submitApplication = async (
       },
     });
 
-    await notify({
-      userId: citizenId,
-      to: { phone: result.phone, email: result.email },
-      templateKey: "soo.invoiceGenerated",
-      vars: {
-        applicant_name: result.fullName,
-        application_id: result.id,
-        invoice_number: result.invoice?.id,
-        payment_amount: `₦${result.invoice?.totalAmount.toLocaleString()}`,
-      },
-      channels: ["sms", "email"],
-    });
-
+    try {
+      await notify({
+        userId: citizenId,
+        to: { phone: result.phone, email: result.email },
+        templateKey: "soo.invoiceGenerated",
+        vars: {
+          applicant_name: result.fullName,
+          application_id: result.id,
+          invoice_number: result.invoice?.id,
+          payment_amount: `₦${result.invoice?.totalAmount.toLocaleString()}`,
+        },
+        channels: ["sms", "email"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[submitApplication] notify() failed, continuing anyway:",
+        notifyErr,
+      );
+    }
     return sendSuccess(
       res,
       result,

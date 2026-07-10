@@ -33,6 +33,7 @@ import paymentRoutes from './modules/payment/payment.routes';
 
 const app = express();
 
+app.disable('etag');
 app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" }
   }));

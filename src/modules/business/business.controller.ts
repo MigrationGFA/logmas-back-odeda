@@ -47,8 +47,8 @@ export const createBusiness = async (
     } = req.body;
 
     // 1. Structural Validation up front
-    const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-    if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
+    // const ward = await prisma.ward.findUnique({ where: { id: wardId } });
+    // if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
 
     let targetOwnerId: string;
 
@@ -138,7 +138,7 @@ export const createBusiness = async (
               role: Role.citizen,
               isWalkIn: true,
               walkInRegisteredById: actorId,
-              wardId,
+              // wardId,
             },
           });
         });
@@ -168,11 +168,11 @@ export const createBusiness = async (
         cacNumber,
         category,
         description,
-        wardId,
+        // wardId,
         ownerId: targetOwnerId,
       },
       include: {
-        ward: { select: { id: true, name: true } },
+        // ward: { select: { id: true, name: true } },
         owner: {
           select: {
             id: true,

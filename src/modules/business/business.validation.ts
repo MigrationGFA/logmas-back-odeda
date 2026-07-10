@@ -10,7 +10,7 @@ export const createBusinessSchema = z.object({
   cacNumber: z.string().optional(),
   category: z.string().min(2, 'Business category is required'),
   description: z.string().optional(),
-  wardId: z.string().uuid('Invalid ward ID'),
+  // wardId: z.string().uuid('Invalid ward ID'),
 });
 
 export const updateBusinessSchema = z.object({

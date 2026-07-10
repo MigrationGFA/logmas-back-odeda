@@ -354,8 +354,8 @@ model Business {
   ownerId String
   owner   User   @relation(fields: [ownerId], references: [id])
 
-  wardId String
-  ward   Ward   @relation(fields: [wardId], references: [id])
+  wardId String?
+  ward   Ward?   @relation(fields: [wardId], references: [id])
 
   permits  Permit[]
   invoices Invoice[]

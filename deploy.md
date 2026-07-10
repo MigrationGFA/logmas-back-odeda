@@ -18,5 +18,18 @@ From https://github.com/MigrationGFA/logmas-backend
 
 dont forget to get token from developer settings fine token grain
 
+# 1. Install any new dependencies you might have added locally
+npm install
+
+# 2. Sync your database schema and refresh the Prisma client types
+npx prisma db push
+npx prisma generate
+
+# 3. Compile your TypeScript code into production-ready JavaScript
+npm run build
+
+# 4. Kill the stale processes so Passenger boots up using the fresh build folder
+pkill -u getfjupm node
+
 
 npx prisma db push

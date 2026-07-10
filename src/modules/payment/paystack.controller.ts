@@ -1,6 +1,3 @@
-// src/payments/paystack.controller.ts
-//
-// TODO: fix these import paths to match your actual project structure
 import { Request, Response, NextFunction } from "express";
 
 import { confirmPayment } from "./payment.service";
@@ -55,8 +52,6 @@ export const initializePaystackPayment = async (
       email: userEmail,
       amountKobo,
       reference,
-      // TODO: set this to your frontend's "payment result" page, which reads ?reference=
-      // from the URL and calls the verify endpoint below on load.
       callbackUrl: process.env.PAYSTACK_CALLBACK_URL,
       metadata: {
         invoiceId: invoice.id,
@@ -98,16 +93,15 @@ export const initializePaystackPayment = async (
 };
 
 // GET /api/v1/payments/verify/:reference
-// This is what your frontend calls on refresh / on landing back from Paystack's redirect,
-// so the citizen/business sees an updated status even if the webhook hasn't landed yet
-// (useful right now especially, given your server's outbound network has been flaky).
+// This is what your frontend calls on refresh / on landing back from Paystack's redirect.
 export const verifyPaystackPayment = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const { reference } = req.params;
+    // Explicitly cast to string to fix TS2322 (string | string[] type bounds)
+    const reference = req.params.reference as string;
 
     const payment = await prisma.payment.findUnique({
       where: { reference },
@@ -122,12 +116,15 @@ export const verifyPaystackPayment = async (
         404,
       );
 
+    // Safely assert relation types to handle uncompiled local prisma clients
+    const paymentWithInvoice = payment as typeof payment & { invoice: any };
+
     // Already confirmed — nothing to do, return current state.
-    if (payment.status === "confirmed") {
+    if (paymentWithInvoice.status === "confirmed") {
       return sendSuccess(res, {
         status: "confirmed",
-        payment,
-        invoice: payment.invoice,
+        payment: paymentWithInvoice,
+        invoice: paymentWithInvoice.invoice,
       });
     }
 
@@ -143,22 +140,22 @@ export const verifyPaystackPayment = async (
     }
 
     if (verifyResult.data!.status !== "success") {
-      // Paystack says it's not paid yet — leave it pending, let the frontend keep polling/retrying.
+      // Paystack says it's not paid yet — leave it pending.
       return sendSuccess(res, {
         status: verifyResult.data!.status,
-        payment,
-        invoice: payment.invoice,
+        payment: paymentWithInvoice,
+        invoice: paymentWithInvoice.invoice,
       });
     }
 
     const confirmResult = await confirmPayment({
-      invoiceId: payment.invoiceId,
+      invoiceId: paymentWithInvoice.invoiceId,
       amount: verifyResult.data!.amountKobo / 100,
       method: "online_gateway",
       reference,
       gatewayRef: reference,
-      paidById: payment.paidById,
-      confirmedById: null, // system-confirmed, not an officer
+      paidById: paymentWithInvoice.paidById,
+      confirmedById: null, // system-confirmed
     });
 
     return sendSuccess(res, {
@@ -173,16 +170,9 @@ export const verifyPaystackPayment = async (
 };
 
 // POST /api/v1/payments/webhook
-// IMPORTANT: this route needs the RAW request body (not JSON-parsed) to verify Paystack's
-// signature. In your app entry file, mount this route BEFORE your global express.json()
-// middleware, or exclude this path from it — e.g.:
-//
-//   app.post('/api/v1/payments/webhook', express.raw({ type: 'application/json' }), paystackWebhook);
-//   app.use(express.json()); // everything else
-//
 export const paystackWebhook = async (req: Request, res: Response) => {
   const signature = req.headers["x-paystack-signature"] as string | undefined;
-  const rawBody = req.body as Buffer; // requires express.raw() on this route, see note above
+  const rawBody = req.body as Buffer; // requires express.raw() on this route
 
   if (!verifyWebhookSignature(rawBody, signature)) {
     return res
@@ -197,9 +187,11 @@ export const paystackWebhook = async (req: Request, res: Response) => {
     const event = JSON.parse(rawBody.toString("utf8"));
 
     if (event.event === "charge.success") {
-      const { reference, amount, metadata } = event.data;
+      const { reference, amount } = event.data;
 
-      const payment = await prisma.payment.findUnique({ where: { reference } });
+      const payment = await prisma.payment.findUnique({ 
+        where: { reference: reference as string } 
+      });
       if (!payment) {
         console.error(
           `[paystack.webhook] No payment found for reference ${reference}`,
@@ -211,29 +203,25 @@ export const paystackWebhook = async (req: Request, res: Response) => {
         invoiceId: payment.invoiceId,
         amount: amount / 100,
         method: "online_gateway",
-        reference,
-        gatewayRef: reference,
+        reference: reference as string,
+        gatewayRef: reference as string,
         paidById: payment.paidById,
         confirmedById: null,
       });
     }
-    // TODO: handle other event types if needed, e.g. "charge.failed" to mark Payment as failed
   } catch (err) {
     console.error("[paystack.webhook] processing error:", err);
   }
 };
 
 // POST /api/v1/invoices/:id/send-payment-link
-// Field-officer-only. Sends the Paystack checkout link to the BUSINESS's phone/email
-// directly — does not rely on req.user being the payer, since the officer is logged in,
-// not the business owner.
 export const sendPaymentLinkToBusiness = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const { id } = req.params; // invoiceNumber, same convention as /pay and /pay-online
+    const { id } = req.params; 
     const role = req.user!.role;
 
     if (!["field_officer", "lga_admin", "super_admin"].includes(role)) {
@@ -273,9 +261,6 @@ export const sendPaymentLinkToBusiness = async (
 
     const business = invoice.business;
 
-    // TEST MODE: while we're validating the Paystack flow, send everything to a fixed
-    // test contact instead of the real business's phone/email. Set NOTIFICATION_TEST_MODE=false
-    // in .env once you're ready to send to real business contacts.
     const isTestMode = process.env.NOTIFICATION_TEST_MODE !== "false";
     const recipientEmail = isTestMode
       ? process.env.TEST_RECIPIENT_EMAIL
@@ -321,8 +306,6 @@ export const sendPaymentLinkToBusiness = async (
       );
     }
 
-    // Pending Payment row so verify/webhook can match it later, paidBy left null —
-    // there's no User guaranteed to exist for a true walk-in with no account.
     await prisma.payment.create({
       data: {
         invoice: { connect: { id: invoice.id } },

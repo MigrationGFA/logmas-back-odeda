@@ -1,10 +1,4 @@
 // src/payments/payment.service.ts
-//
-// Shared "confirm a payment against an invoice" logic — extracted from your existing
-// recordInvoicePayment/simulatePayment transaction blocks so it's reusable and idempotent
-// across: field officer manual entry, Paystack webhook, and Paystack verify-on-refresh.
-//
-// TODO: fix these import paths to match your actual project structure
 import { PaymentMethod, PaymentStatus } from "@prisma/client";
 import { prisma } from "../../utils/prisma";
 import {
@@ -12,17 +6,17 @@ import {
   generateReceiptNumber,
   generateVerificationCode,
   generateQrToken,
-} from "../../utils/generators"; // TODO: match your actual utils path
+} from "../../utils/generators";
 
 interface ConfirmPaymentParams {
-  invoiceId: string; // Invoice.id (not invoiceNumber — resolve that before calling this)
+  invoiceId: string;
   amount: number;
   method: PaymentMethod;
   reference?: string;
   gatewayRef?: string;
   narration?: string;
   paidById?: string | null;
-  confirmedById?: string | null; // officer who confirmed cash/POS, null for gateway/system
+  confirmedById?: string | null;
 }
 
 interface ConfirmPaymentResult {
@@ -36,12 +30,6 @@ interface ConfirmPaymentResult {
 /**
  * Confirms a payment against an invoice: creates the Payment row, updates the invoice's
  * amountPaid/balanceDue/status, and generates a Receipt on full payment.
- *
- * IDEMPOTENT: if a Payment with this reference already exists and is already `confirmed`,
- * this returns the existing state instead of double-crediting the invoice. This matters
- * because Paystack webhooks can fire more than once for the same event, and your
- * verify-on-refresh call can also race with the webhook — both may try to confirm the
- * same transaction.
  */
 export async function confirmPayment({
   invoiceId,
@@ -109,8 +97,11 @@ export async function confirmPayment({
 
     let receipt = null;
     if (isFullPayment) {
-      // Guard against duplicate receipt creation (Invoice.receipt is a unique 1:1)
       const existingReceipt = await tx.receipt.findUnique({ where: { invoiceId } });
+      
+      // Determine a safe fallback ID for who issued the receipt
+      const issuerId = confirmedById || paidById || (invoice as any).createdById || (invoice as any).userId;
+
       receipt =
         existingReceipt ??
         (await tx.receipt.create({
@@ -120,12 +111,12 @@ export async function confirmPayment({
             qrToken: generateQrToken(),
             amountPaid: newAmountPaid,
             invoice: { connect: { id: invoiceId } },
-            issuedBy: { connect: { id: confirmedById ?? paidById ?? invoice.createdById } },
+            // Connect unconditionally if an issuer identity exists
+            issuedBy: issuerId ? { connect: { id: issuerId } } : undefined,
           },
         }));
 
-      // Advance whatever this invoice is actually paying for. An Invoice can be linked
-      // to at most one of these (schema enforces it via unique invoiceId on each side).
+      // Advance whatever this invoice is actually paying for.
       const linkedPermit = await tx.permit.findUnique({ where: { invoiceId } });
       if (linkedPermit && linkedPermit.status !== "issued") {
         await tx.permit.update({

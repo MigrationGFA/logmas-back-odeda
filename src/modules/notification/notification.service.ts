@@ -57,15 +57,41 @@ function stringifyError(error: unknown): string {
   }
 }
 
+
 /**
  * Send a notification across one or more channels using a template, and log each attempt.
  * Returns per-channel results so the caller can see what succeeded/failed.
  */
 export async function notify({ userId, to, templateKey, vars, channels }: NotifyParams) {
   const template = resolveTemplate(templateKey);
-  const results: Record<string, { success: boolean; error?: string }> = {};
-
+  const results: Record<string, { success: boolean; error?: string; skipped?: boolean }> = {};
+ 
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { notifyByEmail: true, notifyBySms: true, notifyByInApp: true },
+  });
+ 
+  const isChannelEnabled = (channel: Channel): boolean => {
+    if (!user) return true; // fail open — don't silently drop notifications over a missing lookup
+    if (channel === "sms") return user.notifyBySms;
+    if (channel === "email") return user.notifyByEmail;
+    return true;
+  };
+ 
   for (const channel of channels) {
+    if (!isChannelEnabled(channel)) {
+      const skippedRecord = await prisma.notification.create({
+        data: {
+          channel: channel as any,
+          status: "skipped" as any,
+          message: `Skipped — user has ${channel} notifications disabled`,
+          userId,
+        },
+      });
+      results[channel] = { success: false, skipped: true };
+      continue;
+    }
+ 
     if (channel === "sms") {
       if (!template.sms) {
         results.sms = { success: false, error: `No sms template for "${templateKey}"` };
@@ -75,9 +101,9 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
         results.sms = { success: false, error: "No phone number provided" };
         continue;
       }
-
+ 
       const message = interpolate(template.sms, vars);
-
+ 
       // Log as pending first so you have a record even if the process crashes mid-send
       const record = await prisma.notification.create({
         data: {
@@ -87,19 +113,19 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
           userId,
         },
       });
-
+ 
       const result = await sendSms({ to: to.phone, message });
-
+ 
       await prisma.notification.update({
         where: { id: record.id },
         data: result.success
           ? { status: "sent" as any, sentAt: new Date() }
           : { status: "failed" as any, failReason: stringifyError(result.error) },
       });
-
+ 
       results.sms = { success: result.success, error: result.error };
     }
-
+ 
     if (channel === "email") {
       if (!template.emailHtml || !template.emailSubject) {
         results.email = { success: false, error: `No email template for "${templateKey}"` };
@@ -109,10 +135,10 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
         results.email = { success: false, error: "No email address provided" };
         continue;
       }
-
+ 
       const subject = interpolate(template.emailSubject, vars);
       const html = interpolate(template.emailHtml, vars);
-
+ 
       const record = await prisma.notification.create({
         data: {
           channel: "email" as any, // TODO: replace with NotificationChannel.email
@@ -122,19 +148,19 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
           userId,
         },
       });
-
+ 
       const result = await sendEmail({ to: to.email, subject, html });
-
+ 
       await prisma.notification.update({
         where: { id: record.id },
         data: result.success
           ? { status: "sent" as any, sentAt: new Date() }
           : { status: "failed" as any, failReason: stringifyError(result.error) },
       });
-
+ 
       results.email = { success: result.success, error: result.error };
     }
   }
-
+ 
   return results;
 }

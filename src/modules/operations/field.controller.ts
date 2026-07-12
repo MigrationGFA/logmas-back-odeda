@@ -118,7 +118,7 @@ export const getAllWardBusinesses = async (
     // 2. Fetch the commercial footprint explicitly registered by this specific officer
     const businesses = await prisma.business.findMany({
       where: {
-        ownerId: officerId, 
+        ownerId: officerId,
         isActive: true,
         deletedAt: null, // Safeguard against soft-deleted records
       },
@@ -172,7 +172,6 @@ export const getAllWardBusinesses = async (
   }
 };
 
-
 // ─────────────────────────────────────────────────────────────
 // INVOICE GENERATION
 // ─────────────────────────────────────────────────────────────
@@ -199,7 +198,6 @@ export const generateInvoice = async (
       phone,
       email,
       address,
-      wardId,
       category: businessCategory,
 
       // Invoice fields
@@ -224,23 +222,20 @@ export const generateInvoice = async (
         return sendError(res, "Business not found", "NOT_FOUND", null, 404);
     } else {
       // Create business on the fly — field officer registering a new customer
-      if (!businessName || !ownerName || !phone || !wardId) {
+      if (!businessName || !ownerName || !phone) {
         return sendError(
           res,
-          "businessName, ownerName, phone and wardId are required when creating a new business",
+          "businessName, ownerName, and phone are required when creating a new business",
           "BAD_REQUEST",
           null,
           400,
         );
       }
 
-      const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-      if (!ward)
-        return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
-
-      // Check if phone already registered in this ward
+      // Check if phone already registered — no longer scoped to a ward,
+      // matching the same lookup style used in createBusiness.
       const existing = await prisma.business.findFirst({
-        where: { phone, wardId, isActive: true },
+        where: { phone, isActive: true },
       });
 
       if (existing) {
@@ -258,7 +253,7 @@ export const generateInvoice = async (
             email,
             address: address || "",
             category: businessCategory || "General",
-            wardId,
+            // wardId, // not enforced anywhere else in the system currently — dropped here too
             ownerId: officerId, // officer is the proxy owner
           },
           select: { id: true, businessName: true, ownerId: true },
@@ -272,13 +267,7 @@ export const generateInvoice = async (
       where: { id: categoryId },
     });
     if (!revenueCategory) {
-      return sendError(
-        res,
-        "Revenue category not found",
-        "NOT_FOUND",
-        null,
-        404,
-      );
+      return sendError(res, "Revenue category not found", "NOT_FOUND", null, 404);
     }
 
     // ── 3. Block duplicate unpaid invoice ─────────────────────
@@ -304,22 +293,14 @@ export const generateInvoice = async (
     let unitAmount: number;
 
     if (levyConfigId) {
-      // Officer explicitly picked a levy config from the UI
       levyConfig = await prisma.levyConfig.findUnique({
         where: { id: levyConfigId, isActive: true },
       });
       if (!levyConfig) {
-        return sendError(
-          res,
-          "Levy configuration not found or inactive",
-          "NOT_FOUND",
-          null,
-          404,
-        );
+        return sendError(res, "Levy configuration not found or inactive", "NOT_FOUND", null, 404);
       }
       unitAmount = Number(levyConfig.amount);
     } else {
-      // Fall back to first active config for this category
       levyConfig = await prisma.levyConfig.findFirst({
         where: { categoryId, isActive: true },
         orderBy: { createdAt: "desc" },
@@ -347,8 +328,7 @@ export const generateInvoice = async (
     const invoice = await prisma.invoice.create({
       data: {
         categoryId,
-        description:
-          description || `${revenueCategory.name} — ${business.businessName}`,
+        description: description || `${revenueCategory.name} — ${business.businessName}`,
         subtotal,
         totalAmount,
         balanceDue: totalAmount,
@@ -357,23 +337,12 @@ export const generateInvoice = async (
         createdById: officerId,
         assignedOfficerId: officerId,
         businessId: business.id,
-        dueDate: dueDate
-          ? new Date(dueDate)
-          : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        dueDate: dueDate ? new Date(dueDate) : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
       },
       include: {
-        business: {
-          select: {
-            id: true,
-            businessName: true,
-            ownerName: true,
-            phone: true,
-          },
-        },
+        business: { select: { id: true, businessName: true, ownerName: true, phone: true } },
         category: { select: { id: true, name: true, slug: true } },
-        levyConfig: {
-          select: { id: true, name: true, billingCycle: true, amount: true },
-        },
+        levyConfig: { select: { id: true, name: true, billingCycle: true, amount: true } },
       },
     });
 

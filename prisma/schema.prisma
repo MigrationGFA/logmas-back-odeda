@@ -182,6 +182,9 @@ model User {
   createdById  String? // MISSING ITEM ADDED: Tracks who registered this user account globally
   createdBy    User?   @relation("UserCreator", fields: [createdById], references: [id])
   createdUsers User[]  @relation("UserCreator")
+  notifyByEmail Boolean @default(true)
+  notifyBySms   Boolean @default(true)
+  notifyByInApp  Boolean @default(true)
 
   wardId String?
   ward   Ward?   @relation("UserWard", fields: [wardId], references: [id])

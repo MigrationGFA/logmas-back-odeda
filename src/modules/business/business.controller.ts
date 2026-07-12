@@ -19,8 +19,20 @@ import { notify } from "../notification/notification.service";
 
 /**
  * POST /api/v1/business
- * Business owner registers their business.
- * One active business per user enforced.
+ * Registers a business. This is the ONLY business-registration endpoint —
+ * delete /field-officer/businesses and its registerBusiness controller entirely,
+ * nothing should call that anymore.
+ *
+ * Ownership rules:
+ * - citizen / business_owner: owns it themselves (one active business per owner).
+ * - field_officer / lga_admin / super_admin + existingUserId: assigns to that
+ *   real, already-registered account (e.g. the business owner signed up separately
+ *   and the officer is just formalizing their business).
+ * - field_officer / lga_admin / super_admin, no existingUserId: the STAFF MEMBER
+ *   is recorded as ownerId (system-level record holder), while the real-world
+ *   owner's name/phone/email live as plain fields on the Business row itself —
+ *   no fake User account gets created. If that owner later signs up for real,
+ *   handle reassignment via a separate "claim business" flow at that point.
  */
 export const createBusiness = async (
   req: Request,
@@ -41,21 +53,31 @@ export const createBusiness = async (
       category,
       description,
       wardId,
-      ownerPhone,
-      email: ownerEmail,
       existingUserId,
     } = req.body;
 
-    // 1. Structural Validation up front
     // const ward = await prisma.ward.findUnique({ where: { id: wardId } });
     // if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
+
+    const duplicate = await prisma.business.findFirst({
+      where: { businessName, phone, isActive: true },
+    });
+    if (duplicate) {
+      return sendError(
+        res,
+        "A business with this phone number already exists",
+        "CONFLICT",
+        null,
+        409,
+      );
+    }
 
     let targetOwnerId: string;
 
     // ─────────────────────────────────────────────────────
     // CITIZEN / BUSINESS OWNER — self-registration
     // ─────────────────────────────────────────────────────
-    if (actorRole === Role.citizen || actorRole === Role.business_owner) {
+    if ( actorRole === Role.business_owner) {
       const existing = await prisma.business.findFirst({
         where: { ownerId: actorId, isActive: true },
       });
@@ -71,7 +93,7 @@ export const createBusiness = async (
       targetOwnerId = actorId;
     }
     // ─────────────────────────────────────────────────────
-    // FIELD ENFORCEMENT & ADMINISTRATIVE HUB ONBOARDING
+    // FIELD OFFICER / ADMIN — registers on behalf of someone
     // ─────────────────────────────────────────────────────
     else if (
       actorRole === Role.field_officer ||
@@ -84,80 +106,28 @@ export const createBusiness = async (
           select: { id: true },
         });
         if (!existingUser) {
-          return sendError(
-            res,
-            "Specified user account not found in system registers",
-            "NOT_FOUND",
-            null,
-            404,
-          );
+          return sendError(res, "Specified user account not found", "NOT_FOUND", null, 404);
         }
         targetOwnerId = existingUserId;
       } else {
-        // Enforce fallback boundaries for walk-in cash-paying merchants
-        const contactPhone = ownerPhone || phone;
-        const contactName = ownerName;
-
-        if (!contactName || !contactPhone) {
+        if (!ownerName || !phone) {
           return sendError(
             res,
-            "Owner name and phone number are required to register an unauthenticated street merchant",
+            "Owner name and phone number are required",
             "BAD_REQUEST",
             null,
             400,
           );
         }
-
-        // Clean name parsing safely
-        const nameParts = contactName.trim().split(/\s+/);
-        const firstName = nameParts[0];
-        const lastName = nameParts.slice(1).join(" ") || "Walk-In";
-
-        // 🚀 EXECUTE ATOMIC TRANSIT TRANSACTION
-        // This ensures lookup-or-create runs smoothly without race condition crashes
-        const finalOwner = await prisma.$transaction(async (tx) => {
-          const existingByPhone = await tx.user.findFirst({
-            where: { phone: contactPhone },
-            select: { id: true },
-          });
-
-          if (existingByPhone) {
-            return existingByPhone;
-          }
-
-          // Build locked-down user object mapping tree
-          const secureTempPassword = await bcrypt.hash(crypto.randomUUID(), 12);
-
-          return await tx.user.create({
-            data: {
-              firstName,
-              lastName,
-              phone: contactPhone,
-              email: ownerEmail || null,
-              password: secureTempPassword,
-              role: Role.citizen,
-              isWalkIn: true,
-              walkInRegisteredById: actorId,
-              // wardId,
-            },
-          });
-        });
-
-        targetOwnerId = finalOwner.id;
+        // No account exists for this business owner — record the staff member
+        // as the system-level owner. Real owner's identity lives in
+        // ownerName/phone/email on the Business row itself.
+        targetOwnerId = actorId;
       }
     } else {
-      return sendError(
-        res,
-        "Your role is unauthorized to register operational properties",
-        "FORBIDDEN",
-        null,
-        403,
-      );
+      return sendError(res, "Your role is not authorized to register a business", "FORBIDDEN", null, 403);
     }
 
-    // ─────────────────────────────────────────────────────
-    // WRITE INTEGRATED BUSINESS BLOCK ATOMICALLY
-    // ─────────────────────────────────────────────────────
     const business = await prisma.business.create({
       data: {
         businessName,
@@ -174,18 +144,11 @@ export const createBusiness = async (
       include: {
         // ward: { select: { id: true, name: true } },
         owner: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            phone: true,
-            isWalkIn: true,
-          },
+          select: { id: true, firstName: true, lastName: true, phone: true },
         },
       },
     });
 
-    // Log the transaction track
     await prisma.auditLog.create({
       data: {
         action: "user_created",
@@ -197,18 +160,13 @@ export const createBusiness = async (
           category,
           registeredByRole: actorRole,
           targetOwnerId,
-          isWalkIn: business.owner.isWalkIn,
+          isSelfRegistered: targetOwnerId === actorId && (actorRole === Role.business_owner),
         },
         ipAddress: getIp(req),
       },
     });
 
-    return sendSuccess(
-      res,
-      business,
-      "Business entity registered successfully onto local registers",
-      201,
-    );
+    return sendSuccess(res, business, "Business registered successfully", 201);
   } catch (err) {
     next(err);
   }

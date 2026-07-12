@@ -105,21 +105,20 @@ export const getAllWardBusinesses = async (
 ) => {
   try {
     // 1. Structural safety enforcement using logged-in officer session context
-    if (!req.user || !req.user.wardId) {
+    if (!req.user || !req.user.id) {
       res.status(403).json({
         success: false,
-        message:
-          "Access Denied: Missing localized structural geographic scope bindings.",
+        message: "Access Denied: Missing localized authentication bindings.",
       });
       return;
     }
 
-    const { wardId } = req.user;
+    const officerId = req.user.id;
 
-    // 2. Fetch the entire active commercial footprint for this specific ward boundary
+    // 2. Fetch the commercial footprint explicitly registered by this specific officer
     const businesses = await prisma.business.findMany({
       where: {
-        wardId: wardId,
+        ownerId: officerId, 
         isActive: true,
         deletedAt: null, // Safeguard against soft-deleted records
       },
@@ -160,18 +159,19 @@ export const getAllWardBusinesses = async (
       orderBy: { businessName: "asc" },
     });
 
-    // 3. Return the payload cleanly. Frontend can now process instant offline/local text parsing
+    // 3. Return the payload cleanly.
     return sendSuccess(res, {
       data: businesses,
       meta: {
         total: businesses.length,
-        wardId,
+        createdById: officerId,
       },
     });
   } catch (err) {
     next(err);
   }
 };
+
 
 // ─────────────────────────────────────────────────────────────
 // INVOICE GENERATION

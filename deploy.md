@@ -34,4 +34,9 @@ pkill -u getfjupm node
 
 npx prisma db push
 
-npx prisma migrate dev --name added_some_again
+npx prisma migrate dev --name added_some_shit
+
+
+# seed plan for revenue category if need be
+hard code the categories using npx prisma db seed
+make sure the seed file is properly typed

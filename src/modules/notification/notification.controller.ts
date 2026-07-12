@@ -1,6 +1,6 @@
 // src/notifications/notification.controller.ts
 
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { notify } from "./notification.service";
 
 // POST /notifications/send
@@ -29,6 +29,69 @@ export async function sendNotificationController(req: Request, res: Response) {
     return res.status(500).json({ success: false, message: err.message });
   }
 }
+
+
+import { sendError, sendSuccess } from "../../utils/response";
+import { prisma } from "../../utils/prisma";
+
+// GET /api/v1/notifications/my?page=1&limit=20
+export const getMyNotifications = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 20);
+
+    const [items, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.notification.count({ where: { userId, isRead: false } }),
+    ]);
+
+    return sendSuccess(res, { items, unreadCount, page, limit }); // TODO: match your sendSuccess path
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/v1/notifications/:id/read
+export const markNotificationRead = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const { id } = req.params;
+
+    const notification = await prisma.notification.findUnique({ where: { id: String(id) } });
+    if (!notification || notification.userId !== userId) {
+      return sendError(res, "Notification not found", "NOT_FOUND", null, 404); // TODO: match your sendError path
+    }
+
+    const updated = await prisma.notification.update({
+      where: { id: String(id) },
+      data: { isRead: true, readAt: new Date() },
+    });
+
+    return sendSuccess(res, updated);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/v1/notifications/read-all
+export const markAllNotificationsRead = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    await prisma.notification.updateMany({
+      where: { userId, isRead: false },
+      data: { isRead: true, readAt: new Date() },
+    });
+    return sendSuccess(res, { message: "All notifications marked as read" });
+  } catch (err) {
+    next(err);
+  }
+};
 
 /* Example route wiring (src/notifications/notification.routes.ts):
 

@@ -6,6 +6,7 @@ import swaggerUi from 'swagger-ui-express';
 
 import authRoutes from './modules/auth/auth.routes';
 import userRoutes from './modules/user/users.routes';
+import notificationsRoutes from './modules/notification/notification.routes';
 import wardRoutes from './modules/ward/wards.routes';
 import complaintRoutes from './modules/complaints/complaints.routes';
 import fieldOperationsRoutes from './modules/operations/field.routes';
@@ -61,6 +62,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/wards', wardRoutes);
 app.use('/api/v1/lga', lgaRoutes);
+app.use('/api/v1/notifications', notificationsRoutes);
 app.use('/api/v1/test', testRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/categories', revCat);

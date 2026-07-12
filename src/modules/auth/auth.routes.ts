@@ -1,6 +1,6 @@
 // auth.routes.ts
 import { Router } from 'express';
-import { login, register, getMe, googleLogin, refreshToken } from './auth.controller';
+import { login, register, getMe, googleLogin, refreshToken, updateUserProfile } from './auth.controller';
 import { validateBody } from '../../middleware/validate.middleware';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { registerSchema, loginSchema, googleAuthSchema } from './auth.validation';
@@ -401,5 +401,6 @@ router.get('/me', requireAuth, getMe);
  *                   example: "Invalid or expired refresh token"
  */
 router.post('/refresh', refreshToken);
+router.patch('/update/profile/:id',requireAuth, updateUserProfile);
 
 export default router;

@@ -289,7 +289,8 @@ export const sendPaymentLinkToBusiness = async (
     const reference = generateReference("PAY");
     const amountKobo = Math.round(Number(invoice.balanceDue) * 100);
 
-   
+    // Ensure callbackUrl is defined (using fallback or env var)
+    const callbackUrl = process.env.PAYSTACK_CALLBACK_URL;
 
     const gatewayResult = await initializeTransaction({
       email: recipientEmail,
@@ -297,9 +298,9 @@ export const sendPaymentLinkToBusiness = async (
       reference,
       callbackUrl,
       metadata: {
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.invoiceNumber,
-      businessId: business.id,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        businessId: business.id,
       },
     });
 
@@ -333,23 +334,47 @@ export const sendPaymentLinkToBusiness = async (
 
     const template = NotificationTemplates.permit.invoiceGenerated;
 
-    const [smsResult, emailResult] = await Promise.all([
-      sendSms({
-        to: recipientPhone!.replace("+", ""),
-        message: interpolate(template.sms, vars),
-      }),
-      sendEmail({
-        to: recipientEmail,
-        subject: interpolate(template.emailSubject, vars),
-        html: interpolate(template.emailHtml, vars),
-      }),
+    // Initialize tracking flags
+    let smsSent = false;
+    let emailSent = false;
+
+    // 💡 Decoupled parallel execution with independent try/catch shields
+    await Promise.all([
+      (async () => {
+        try {
+          if (recipientPhone) {
+            const smsResult = await sendSms({
+              to: recipientPhone.replace("+", ""),
+              message: interpolate(template.sms, vars),
+            });
+            smsSent = !!smsResult?.success;
+          }
+        } catch (smsErr) {
+          console.error("[Notification Error] SMS transmission pipeline failed:", smsErr);
+          smsSent = false; // Graceful isolation: API keeps running
+        }
+      })(),
+      
+      (async () => {
+        try {
+          const emailResult = await sendEmail({
+            to: recipientEmail,
+            subject: interpolate(template.emailSubject, vars),
+            html: interpolate(template.emailHtml, vars),
+          });
+          emailSent = !!emailResult?.success;
+        } catch (emailErr) {
+          console.error("[Notification Error] Email transmission pipeline failed:", emailErr);
+          emailSent = false; // Graceful isolation: API keeps running
+        }
+      })()
     ]);
 
     return sendSuccess(res, {
       reference,
       checkoutLink,
-      smsSent: smsResult.success,
-      emailSent: emailResult.success,
+      smsSent,
+      emailSent,
     });
   } catch (err) {
     next(err);

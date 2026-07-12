@@ -276,4 +276,120 @@ export const refreshToken = async (
   }
 };
 
-// auth.routes.ts
+
+// PUT /api/v1/users/profile
+// PUT /api/v1/users/profile
+export const updateUserProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    // 1. Ensure the session contains a valid user context
+    if (!req.user || !req.user.id) {
+      return sendError(res, "Unauthorized context binding", "UNAUTHORIZED", null, 401);
+    }
+
+    const userId = req.user.id;
+    const { 
+      firstName, 
+      lastName, 
+      phone,
+      notifyByEmail,
+      notifyBySms,
+      notifyByInApp
+    } = req.body;
+
+    // 2. Input validation checks for text fields
+    if (firstName !== undefined && typeof firstName !== "string") {
+      return sendError(res, "First name must be a valid string", "BAD_REQUEST", null, 400);
+    }
+    if (lastName !== undefined && typeof lastName !== "string") {
+      return sendError(res, "Last name must be a valid string", "BAD_REQUEST", null, 400);
+    }
+    if (phone !== undefined && typeof phone !== "string") {
+      return sendError(res, "Phone number must be a valid string", "BAD_REQUEST", null, 400);
+    }
+
+    // 3. Input validation checks for notification booleans
+    if (notifyByEmail !== undefined && typeof notifyByEmail !== "boolean") {
+      return sendError(res, "notifyByEmail must be a boolean value", "BAD_REQUEST", null, 400);
+    }
+    if (notifyBySms !== undefined && typeof notifyBySms !== "boolean") {
+      return sendError(res, "notifyBySms must be a boolean value", "BAD_REQUEST", null, 400);
+    }
+    if (notifyByInApp !== undefined && typeof notifyByInApp !== "boolean") {
+      return sendError(res, "notifyByInApp must be a boolean value", "BAD_REQUEST", null, 400);
+    }
+
+    // 4. Duplicate phone number check - ONLY if phone is provided AND not empty
+    if (phone && phone.trim() !== "") {
+      const trimmedPhone = phone.trim();
+      
+      const duplicatePhone = await prisma.user.findFirst({
+        where: {
+          phone: trimmedPhone,
+          id: { not: userId },
+          // Exclude users with empty/null phone numbers
+          NOT: {
+            OR: [
+              { phone: null },
+              { phone: "" }
+            ]
+          }
+        },
+      });
+
+      if (duplicatePhone) {
+        return sendError(
+          res,
+          "This phone number is already registered to another account",
+          "CONFLICT",
+          null,
+          409
+        );
+      }
+    }
+
+    // 5. Prepare update data
+    const updateData: any = {};
+
+    // Text fields - only include if provided
+    if (firstName !== undefined) {
+      updateData.firstName = firstName.trim();
+    }
+    if (lastName !== undefined) {
+      updateData.lastName = lastName.trim();
+    }
+    if (phone !== undefined) {
+      // If phone is empty string or null, set to null instead of empty string
+      updateData.phone = phone.trim() !== "" ? phone.trim() : null;
+    }
+
+    // Boolean fields - only include if provided
+    if (notifyByEmail !== undefined) {
+      updateData.notifyByEmail = notifyByEmail;
+    }
+    if (notifyBySms !== undefined) {
+      updateData.notifyBySms = notifyBySms;
+    }
+    if (notifyByInApp !== undefined) {
+      updateData.notifyByInApp = notifyByInApp;
+    }
+
+    // 6. Update user record
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    // 7. Respond with the clean updated model profile
+    return sendSuccess(
+      res, 
+      updatedUser, 
+      "Settings and profile updated successfully"
+    );
+  } catch (err) {
+    next(err);
+  }
+};

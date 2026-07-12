@@ -291,13 +291,16 @@ export const getInvoiceById = async (
             config: true,
           },
         },
+        category:{
+          select:{name:true,type:true}
+        }
       },
     });
 
     if (!invoice)
       return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
 
-    console.log(invoice, "invoice❤️");
+    // console.log(invoice, "invoice❤️");
 
     // Ownership check — citizen/business_owner can only see their own
     const publicRoles = ["citizen", "business_owner"];
@@ -327,7 +330,7 @@ export const getInvoiceById = async (
     // DYNAMIC INVOICE TYPE DETERMINATION & FORMATTING
     const isPermitInvoice = !!invoice.permit;
 
-    let levyType = "Trade Permit";
+    let levyType = invoice.category?.name || "Trade Permit";
     let frequency = "annually";
     let unitPrice = Number(invoice.subtotal || invoice.totalAmount);
     let quantity = 1;

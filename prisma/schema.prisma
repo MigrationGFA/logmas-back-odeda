@@ -624,16 +624,30 @@ model ComplaintResponse {
 // ============================================================
 
 model Notification {
-  id         String              @id @default(uuid())
-  channel    NotificationChannel
-  status     NotificationStatus  @default(pending)
-  subject    String?
-  message    String
-  sentAt     DateTime?
-  failReason String?
+  id String @id @default(uuid())
 
   userId String
   user   User   @relation(fields: [userId], references: [id])
+
+  templateKey String  // e.g. "soo.invoiceGenerated" — useful for debugging/filtering later
+  title       String? // short in-app display title (e.g. email subject, or a generated one)
+  message     String  // in-app body text
+
+  // ── In-app inbox state ──────────────────────────────────
+  // Every notification is implicitly "in-app" — no separate status needed
+  // for it beyond read/unread, since creating the row IS the delivery.
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  // ── SMS dispatch (null = never attempted for this notification) ──
+  smsStatus     NotificationStatus?
+  smsSentAt     DateTime?
+  smsFailReason String?
+
+  // ── Email dispatch (null = never attempted for this notification) ──
+  emailStatus     NotificationStatus?
+  emailSentAt     DateTime?
+  emailFailReason String?
 
   createdAt DateTime @default(now())
 

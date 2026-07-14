@@ -380,3 +380,90 @@ export const sendPaymentLinkToBusiness = async (
     next(err);
   }
 };
+
+/**
+ * GET /api/v1/public/payments?page=1&limit=20
+ * Public, unauthenticated. Returns all PAID invoices across the system —
+ * State of Origin certificates, trade permits, and levies alike — since all
+ * three are just Invoices with a different linked parent record.
+ */
+export const getAllPaidServices = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(Number(req.query.page ?? 1), 1);
+    const limit = Math.min(Number(req.query.limit ?? 20), 100); // cap to prevent abuse on a public route
+
+    const where = { status: "paid" as const };
+
+    const [invoices, total] = await Promise.all([
+      prisma.invoice.findMany({
+        where,
+        orderBy: { paidAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          category: { select: { name: true, type: true } },
+          business: {
+            select: {
+              businessName: true,
+              ownerName: true,
+              ward: { select: { name: true } },
+            },
+          },
+          stateOfOriginApplication: {
+            select: {
+              fullName: true,
+              ward: { select: { name: true } },
+            },
+          },
+          permit: {
+            select: {
+              permitNumber: true,
+              config: { select: { name: true } },
+            },
+          },
+        },
+      }),
+      prisma.invoice.count({ where }),
+    ]);
+
+    const results = invoices.map((inv) => {
+      // Exactly one of these two relations can be set per invoice (schema-enforced
+      // via unique invoiceId on each side) — a plain levy invoice has neither.
+      const isStateOfOrigin = !!inv.stateOfOriginApplication;
+      const isPermit = !!inv.permit;
+      const type = isStateOfOrigin ? "state_of_origin" : isPermit ? "permit" : "levy";
+
+      const owner = isStateOfOrigin
+        ? inv.stateOfOriginApplication!.fullName
+        : (inv.business?.ownerName ?? inv.business?.businessName ?? "Unknown");
+
+      const lga = "Ijebu North East LGA"
+
+      return {
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        type,
+        serviceName: isPermit
+          ? (inv.permit!.config?.name ?? "Trade Permit")
+          : (inv.category?.name ?? inv.description),
+        owner,
+        amount: Number(inv.totalAmount),
+        lga,
+        status: inv.status,
+        paidAt: inv.paidAt,
+      };
+    });
+
+    return sendSuccess(res, {
+      results,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

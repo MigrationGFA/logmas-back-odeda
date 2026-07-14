@@ -137,7 +137,7 @@ export const fetchMetricsByRole = async (
         pendingData,
         activeOfficersCount,
         totalTransactionsCount,
-        revenueByInvoiceGroup,
+        categoriesWithRevenue,
         monthlyRevenueRaw,
       ] = await Promise.all([
         // Total Revenue (Paid Invoices)
@@ -162,14 +162,15 @@ export const fetchMetricsByRole = async (
           where: { status: InvoiceStatus.paid },
         }),
         // Grouping by description/category fallback to isolate dynamic configurations
-        prisma.invoice.groupBy({
-          by: ["categoryId"],
-          where: { status: InvoiceStatus.paid },
-          _sum: { amountPaid: true },
-          orderBy: {
-            _sum: { amountPaid: "desc" },
+        prisma.revenueCategory.findMany({
+          select: {
+            id: true,
+            name: true, // 👈 This gets the text label your frontend needs (e.g. "Trade Levy")
+            invoices: {
+              where: { status: InvoiceStatus.paid },
+              select: { amountPaid: true },
+            },
           },
-          take: 5,
         }),
         // Monthly distribution tracking for the trend chart line
         prisma.invoice.findMany({
@@ -188,40 +189,37 @@ export const fetchMetricsByRole = async (
       ]);
 
       // 2. Format 12-Month Revenue Trend Array (in Millions as expected by UI placeholder)
-      const monthsLookup = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-      ];
+    // 2. Format 12-Month Revenue Trend Array (Using accurate native currency formatting)
+      const monthsLookup = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const chartData = monthsLookup.map((monthName, index) => {
         const monthlySum = monthlyRevenueRaw
           .filter((invoice) => new Date(invoice.createdAt).getMonth() === index)
           .reduce((sum, current) => sum + Number(current.amountPaid || 0), 0);
 
-        // Scale to millions if match found, keep accurate native formatting
-        const amountInMillions = Number((monthlySum / 1_000_000).toFixed(2));
-
+        // 💡 REMOVED THE / 1_000_000 SCALE. Now ₦150,000 displays as 150000 instead of 0.15
         return {
           month: monthName,
-          amount: amountInMillions > 0 ? amountInMillions : 0,
+          amount: monthlySum, 
         };
       });
 
       // 3. Transform dynamic billing matrix category text for the progress distribution block
-      const breakdownByCategory = revenueByInvoiceGroup.map((group) => ({
-        category: group.categoryId,
-        amount: Number(group._sum.amountPaid || 0),
-      }));
-
+      const breakdownByCategory = categoriesWithRevenue
+        .map((category) => {
+          const totalPaid = category.invoices.reduce(
+            (sum, inv) => sum + Number(inv.amountPaid || 0),
+            0,
+          );
+          return {
+            category: category.name, // 👈 Replaces the ugly ID string with the readable name
+            amount: totalPaid,
+          };
+        })
+        // Sort descending so the highest earning categories show at the top of your progress blocks
+        .sort((a, b) => b.amount - a.amount)
+        // Take the top 5 earners matching your original design intent
+        .slice(0, 5);
+      console.log(chartData, "revenueByInvoiceGroup❤️");
       // 4. Dispatch payloads formatted specifically for your frontend components
       return {
         metrics: {

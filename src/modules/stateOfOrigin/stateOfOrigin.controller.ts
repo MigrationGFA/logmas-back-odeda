@@ -702,7 +702,76 @@ export const decideonApplication = async (
  * GET /api/v1/state-of-origin/verify/:code
  * Public verification page endpoint
  */
-export const verifyCertificate = async (
+// export const verifyCertificate = async (
+//   req: Request,
+//   res: Response,
+//   next: NextFunction,
+// ) => {
+//   try {
+//     const code = Array.isArray(req.params.code)
+//       ? req.params.code[0]
+//       : req.params.code;
+
+//     // Search explicitly by certificate credentials
+//     const certificate = await prisma.certificate.findFirst({
+//       where: {
+//         OR: [
+//           { certificateNumber: code },
+//           { verificationCode: code },
+//           { qrToken: code },
+//         ],
+//       },
+//       include: {
+//         application: {
+//           include: {
+//             ward: true,
+//             applicant: true,
+//           },
+//         },
+//       },
+//     });
+
+//     if (!certificate) {
+//       return sendError(
+//         res,
+//         "Certificate not found or invalid verification code",
+//         "NOT_FOUND",
+//         null,
+//         404,
+//       );
+//     }
+
+//     const isExpired = certificate.expiresAt
+//       ? certificate.expiresAt < new Date()
+//       : false;
+//     const app = certificate.application;
+
+//     return sendSuccess(res, {
+//       valid: !isExpired && app.status === "approved",
+//       certificateNumber: certificate.certificateNumber,
+//       issuedAt: certificate.issuedAt,
+//       expiresAt: certificate.expiresAt,
+//       isExpired,
+//       holder: (
+//         app.fullName || `${app.applicant?.firstName} ${app.applicant?.lastName}`
+//       ).toUpperCase(),
+//       gender: app.gender || "N/A",
+//       ward: app.ward?.name || "Central",
+//       purpose: app.purpose || "General Purpose",
+//       issuingAuthority: "Ijebu North East Local Government",
+//     });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
+
+
+/**
+ * GET /api/v1/public/verify/:code
+ * Unified public verification endpoint for SOO Certificates, Levies, and Permits
+ */
+export const publicVerify = async (
   req: Request,
   res: Response,
   next: NextFunction,
@@ -712,13 +781,16 @@ export const verifyCertificate = async (
       ? req.params.code[0]
       : req.params.code;
 
-    // Search explicitly by certificate credentials
+    const cleanSearchCode = String(code).trim();
+
+    // 1. Check for SOO Certificate first
     const certificate = await prisma.certificate.findFirst({
       where: {
         OR: [
-          { certificateNumber: code },
-          { verificationCode: code },
-          { qrToken: code },
+          { certificateNumber: cleanSearchCode },
+          { certificateNumber: cleanSearchCode.toUpperCase() },
+          { verificationCode: cleanSearchCode },
+          { qrToken: cleanSearchCode },
         ],
       },
       include: {
@@ -731,39 +803,98 @@ export const verifyCertificate = async (
       },
     });
 
-    if (!certificate) {
-      return sendError(
-        res,
-        "Certificate not found or invalid verification code",
-        "NOT_FOUND",
-        null,
-        404,
-      );
+    if (certificate) {
+      const isExpired = certificate.expiresAt
+        ? certificate.expiresAt < new Date()
+        : false;
+      const app = certificate.application;
+      const isValid = !isExpired && app.status === "approved";
+
+      return sendSuccess(res, {
+        type: "SOO", // Unified discriminator
+        valid: isValid,
+        verificationCode: cleanSearchCode,
+        title: "State of Origin Certificate",
+        idNumber: certificate.certificateNumber,
+        holder: (
+          app.fullName || `${app.applicant?.firstName} ${app.applicant?.lastName}`
+        ).toUpperCase(),
+        issuedAt: certificate.issuedAt,
+        expiresAt: certificate.expiresAt,
+        isExpired,
+        metadata: {
+          gender: app.gender || "N/A",
+          ward: app.ward?.name || "Central",
+          purpose: app.purpose || "General Purpose",
+        },
+        issuingAuthority: "Ijebu North East Local Government",
+      });
     }
 
-    const isExpired = certificate.expiresAt
-      ? certificate.expiresAt < new Date()
-      : false;
-    const app = certificate.application;
-
-    return sendSuccess(res, {
-      valid: !isExpired && app.status === "approved",
-      certificateNumber: certificate.certificateNumber,
-      issuedAt: certificate.issuedAt,
-      expiresAt: certificate.expiresAt,
-      isExpired,
-      holder: (
-        app.fullName || `${app.applicant?.firstName} ${app.applicant?.lastName}`
-      ).toUpperCase(),
-      gender: app.gender || "N/A",
-      ward: app.ward?.name || "Central",
-      purpose: app.purpose || "General Purpose",
-      issuingAuthority: "Ijebu North East Local Government",
+    // 2. If not a certificate, check if it's a Receipt (covers paid Levies and Permits)
+    const receipt = await prisma.receipt.findFirst({
+      where: {
+        OR: [
+          { receiptNumber: cleanSearchCode },
+          { receiptNumber: cleanSearchCode.toUpperCase() },
+          { verificationCode: cleanSearchCode },
+          { qrToken: cleanSearchCode },
+        ],
+      },
+      include: {
+        invoice: {
+          include: {
+            business: {
+              select: { businessName: true, ownerName: true, address: true, ward: { select: { name: true } } },
+            },
+            category: true,
+          },
+        },
+        issuedBy: { select: { firstName: true, lastName: true } },
+      },
     });
+
+    if (receipt) {
+      // Determine if it represents a Permit or a standard Levy based on config parameters
+      const invoiceCategory = receipt.invoice.category;
+      const isPermitType = invoiceCategory?.type === "PERMIT" || invoiceCategory?.name?.toUpperCase().includes("PERMIT");
+      const documentType = isPermitType ? "PERMIT" : "LEVY";
+
+      return sendSuccess(res, {
+        type: documentType, // Unified discriminator: LEVY or PERMIT
+        valid: true, // If a receipt exists in DB, it is valid/paid
+        verificationCode: cleanSearchCode,
+        title: isPermitType ? "Business Operational Permit Receipt" : "Revenue Collection Receipt",
+        idNumber: receipt.receiptNumber,
+        holder: receipt.invoice.business?.businessName || receipt.invoice.business?.ownerName || "N/A",
+        issuedAt: receipt.issuedAt,
+        expiresAt: null, // Receipts don't expire, though permits can
+        isExpired: false,
+        amount: receipt.amountPaid,
+        metadata: {
+          ownerName: receipt.invoice.business?.ownerName || "N/A",
+          businessAddress: receipt.invoice.business?.address || "N/A",
+          categoryName: invoiceCategory?.name || "General Revenue",
+          wardName: receipt.invoice.business?.ward?.name || "N/A",
+          issuedBy: receipt.issuedBy ? { firstName: receipt.issuedBy.firstName, lastName: receipt.issuedBy.lastName } : "System Generated",
+        },
+        issuingAuthority: "Ijebu North East Local Government",
+      });
+    }
+
+    // 3. Neither found
+    return sendError(
+      res,
+      "Verification code not found or invalid",
+      "NOT_FOUND",
+      null,
+      404,
+    );
   } catch (err) {
     next(err);
   }
-};
+}
+
 
 /**
  * GET /api/v1/soo/applications/:applicationId/certificate

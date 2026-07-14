@@ -12,8 +12,9 @@ import {
   forwardToCouncillor,
   getCouncillorQueue,
   decideonApplication,
-  verifyCertificate,
+  // verifyCertificate,
   getCertificateData,
+  publicVerify,
 } from './stateOfOrigin.controller';
 import {
   submitApplicationSchema,
@@ -33,7 +34,7 @@ const router = Router();
 
 
 // ── PUBLIC (no auth) ─────────────────────────────────────────
-router.get('/verify/:code', verifyCertificate);
+router.get('/verify/:code', publicVerify);
 router.get('/certificate/:applicationId', getCertificateData);
 
 // ── CITIZEN ──────────────────────────────────────────────────

@@ -10,18 +10,17 @@ export const listCategories = async (
 ) => {
   try {
     // 1. Extract the optional type from query parameters
-    const { type = "LEVY" } = req.query;
+    const { type } = req.query;
 
-    // 2. Build a dynamic where clause
+    // 2. Build a dynamic where clause if you want to enforce filters later
     const where: any = {};
     if (type) {
-      // Validates uppercase strings to match your Prisma model enum definition safely
       where.type = String(type).toUpperCase();
     }
 
-    // 3. Fetch filtered data from Prisma
+    // 3. Fetch data from Prisma
     const categories = await prisma.revenueCategory.findMany({
-      where, // Injected query filter
+      // where, // Uncomment if you want query-level filtering active
       orderBy: { name: "asc" },
       include: {
         _count: {
@@ -35,7 +34,6 @@ export const listCategories = async (
             amount: true,
             billingCycle: true,
             isActive: true,
-            // mode: true,
           },
         },
         permitConfigs: {
@@ -43,14 +41,27 @@ export const listCategories = async (
           select: {
             id: true,
             name: true,
-            baseAmount:true,
-            isActive:true
+            baseAmount: true,
+            isActive: true,
           },
         },
       },
     });
 
-    return sendSuccess(res, { data: categories });
+    // 4. Map the categories to inject an explicit type field into every config line-item
+    const formattedCategories = categories.map((category) => ({
+      ...category,
+      levyConfigs: category.levyConfigs.map((levy) => ({
+        ...levy,
+        type: "LEVY", // Explicit discriminator type for front-end mapping
+      })),
+      permitConfigs: category.permitConfigs.map((permit) => ({
+        ...permit,
+        type: "PERMIT", // Explicit discriminator type for front-end mapping
+      })),
+    }));
+
+    return sendSuccess(res, { data: formattedCategories });
   } catch (err) {
     next(err);
   }

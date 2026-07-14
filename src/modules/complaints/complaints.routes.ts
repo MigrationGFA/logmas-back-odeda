@@ -11,7 +11,9 @@ import {
   assignComplaint,
   updateComplaintStatus,
   adminRespond,
-  getComplaintStats
+  getComplaintStats,
+  updateComplaintAdmin,
+  citizenRespond
 } from './complaints.controller';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/role.middleware';
@@ -94,6 +96,13 @@ router.post(
   requireRole('citizen', 'business_owner'),
   // validateBody(raiseComplaintSchema),
   raiseComplaint
+);
+
+router.post(
+  '/my/:id/respond',
+  requireAuth,
+  requireRole('citizen', 'business_owner'),
+  citizenRespond
 );
 
 /**
@@ -330,7 +339,7 @@ router.get(
 router.get(
   '/admin/:id',
   requireAuth,
-  requireRole('super_admin', 'lga_admin'),
+  requireRole('super_admin', 'lga_admin',"ward_councillor"),
   getComplaintById
 );
 
@@ -424,6 +433,13 @@ router.patch(
   requireRole('super_admin', 'lga_admin'),
   validateBody(updateComplaintStatusSchema),
   updateComplaintStatus
+);
+router.patch(
+  '/admin/:id',
+  requireAuth,
+  requireRole('super_admin', 'lga_admin'),
+  // validateBody(updateComplaintStatusSchema),
+  updateComplaintAdmin
 );
 
 /**

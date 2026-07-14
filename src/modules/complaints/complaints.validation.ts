@@ -9,6 +9,7 @@ export const raiseComplaintSchema = z.object({
 
 export const assignComplaintSchema = z.object({
   assignedToId: z.string().uuid('Invalid officer ID'),
+  wardId: z.string().uuid('Invalid ward ID'),
 });
 
 export const respondToComplaintSchema = z.object({

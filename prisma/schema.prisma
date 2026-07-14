@@ -589,8 +589,8 @@ model Complaint {
   raisedById String
   raisedBy   User   @relation("ComplaintRaisedBy", fields: [raisedById], references: [id])
 
-  wardId String
-  ward   Ward   @relation(fields: [wardId], references: [id])
+  wardId String?
+  ward   Ward?   @relation(fields: [wardId], references: [id])
 
   assignedToId String?
   assignedTo   User?   @relation("ComplaintAssignedTo", fields: [assignedToId], references: [id])

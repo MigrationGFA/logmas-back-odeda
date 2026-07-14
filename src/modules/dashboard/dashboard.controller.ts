@@ -277,36 +277,6 @@ export const fetchMetricsByRole = async (
         },
       };
     }
-
-    case Role.ward_councillor: {
-      // Councillor scope: restricted to their assigned ward
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { wardId: true },
-      });
-
-      if (!user?.wardId) throw new Error("Councillor not assigned to a ward.");
-
-      const [pendingApps, wardComplaints] = await Promise.all([
-        prisma.stateOfOriginApplication.count({
-          where: {
-            wardId: user.wardId,
-            status: ApplicationStatus.forwarded_to_councillor,
-          },
-        }),
-        prisma.complaint.count({
-          where: { wardId: user.wardId, status: ComplaintStatus.open },
-        }),
-      ]);
-
-      return {
-        metrics: {
-          pendingApprovals: pendingApps,
-          wardComplaints: wardComplaints,
-        },
-      };
-    }
-
     case Role.contractor:
     case Role.agent: {
       const isContractor = role === Role.contractor;
@@ -727,6 +697,94 @@ export const fetchMetricsByRole = async (
         anomalies: formattedOrphans, // Map this to `orphanPaid` in your frontend hook
         highValueTransactions: formattedTopReceipts, // Map this to `largeReceipts` in your frontend hook
         recentAudits: formattedAudits, // Map this to `audits` in your frontend hook
+      };
+    }
+    case Role.ward_councillor: {
+      // Fetch the councillor's profile to get their assigned ward
+      const councillor = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { assignedWardId: true },
+      });
+
+      if (!councillor?.assignedWardId) {
+        throw new Error(
+          "No ward assigned to your account. Please contact the system administrator.",
+        );
+      }
+
+      const wardId = councillor.assignedWardId;
+
+      // Ward-Specific Legislative Scope
+      const [
+        totalConstituents,
+        pendingApprovals,
+        approvedSOO,
+        totalComplaints,
+        recentApplications,
+      ] = await Promise.all([
+        // 1. Count all registered citizens in the councillor's ward
+        prisma.stateOfOriginApplication.count({
+          where: {
+            assignedCouncillorId: userId,
+          },
+        }),
+
+        // 2. Count permits awaiting review in this ward
+        prisma.stateOfOriginApplication.count({
+          where: {
+            status: "forwarded_to_councillor",
+          },
+        }),
+
+        // 3. Count active, approved permits in this ward
+        prisma.stateOfOriginApplication.count({
+          where: {
+            status: { in: ["approved", "certificate_issued"] },
+            // business: { wardId: wardId },
+          },
+        }),
+
+        // 4. Count unresolved complaints inside this ward (safeguarded against missing model)
+        prisma.complaint.count({
+          where: {
+            assignedToId: userId,
+            status: { in: ["in_progress", "open"] },
+          },
+        }),
+
+        // 5. Fetch non-declined applications to populate the visual dashboard table
+        prisma.stateOfOriginApplication.findMany({
+          where: {
+            status: { not: { in: ["rejected"] } },
+            // business: { wardId: wardId },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          select: {
+            id: true,
+            status: true,
+            fullName: true,
+            ward: { select: { name: true } },
+          },
+        }),
+      ]);
+
+      // Map DB schema outputs to match what the React table expects
+      const formattedApplications = recentApplications.map((app) => ({
+        id: app.id.slice(0, 8).toUpperCase(),
+        applicant: app.fullName || "Unknown Applicant",
+        ward: app.ward?.name || "N/A",
+        status: app.status.toLowerCase(),
+      }));
+
+      return {
+        metrics: {
+          totalConstituents,
+          pendingApprovals,
+          approvedSOO,
+          totalComplaints,
+        },
+        applications: formattedApplications,
       };
     }
 

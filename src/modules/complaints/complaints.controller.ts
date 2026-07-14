@@ -4,6 +4,7 @@ import { prisma } from '../../utils/prisma';
 import { sendSuccess, sendError } from '../../utils/response';
 import { generateReceiptNumber } from '../../utils/generators';
 import { ComplaintStatus } from '@prisma/client';
+import { notify } from '../notification/notification.service';
 
 // src/utils/request.ts
 
@@ -29,8 +30,8 @@ export const raiseComplaint = async (req: Request, res: Response, next: NextFunc
     const userId = req.user!.id;
     const { title, description, wardId, category } = req.body;
 
-    const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-    if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
+    // const ward = await prisma.ward.findUnique({ where: { id: wardId } });
+    // if (!ward) return sendError(res, 'Ward not found', 'NOT_FOUND', null, 404);
 
     const complaint = await prisma.complaint.create({
       data: {
@@ -41,9 +42,9 @@ export const raiseComplaint = async (req: Request, res: Response, next: NextFunc
         status: 'open',
         
         // 🚀 FIX: Connect using relationship mappings instead of hard keys
-        ward: {
-          connect: { id: wardId }
-        },
+        // ward: {
+        //   connect: { id: wardId }
+        // },
         raisedBy: {
           connect: { id: userId }
         }
@@ -135,6 +136,30 @@ export const getMyComplaintById = async (req: Request, res: Response, next: Next
   } catch (err) { next(err); }
 };
 
+export const citizenRespond = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id }      = req.params;
+    const userId      = req.user!.id;
+    const { message } = req.body;
+
+    const complaint = await prisma.complaint.findFirst({
+      where: { id: String(id), raisedById: userId },
+    });
+
+    if (!complaint) return sendError(res, 'Not found', 'NOT_FOUND', null, 404);
+    if (complaint.status === 'closed') {
+      return sendError(res, 'Complaint is closed', 'BAD_REQUEST', null, 400);
+    }
+
+    const response = await prisma.complaintResponse.create({
+      data: { complaintId: String(id), message, responderId: userId },
+    });
+
+    return sendSuccess(res, response, 'Response sent');
+  } catch (err) { next(err); }
+};
+
+
 // ─────────────────────────────────────────────────────────────
 // WARD COUNCILLOR — Own Ward Only
 // ─────────────────────────────────────────────────────────────
@@ -153,15 +178,15 @@ export const getWardComplaints = async (req: Request, res: Response, next: NextF
 
     const councillor = await prisma.user.findUnique({
       where: { id: councillorId },
-      select: { wardId: true },
+      // select: { wardId: true },
     });
 
-    if (!councillor?.wardId) {
-      return sendError(res, 'No ward assigned to your account', 'BAD_REQUEST', null, 400);
-    }
+    // if (!councillor?.wardId) {
+    //   return sendError(res, 'No ward assigned to your account', 'BAD_REQUEST', null, 400);
+    // }
 
     const where = {
-      wardId: councillor.wardId,
+      assignedToId: councillorId,
       ...(status && { status }),
     };
 
@@ -181,7 +206,7 @@ export const getWardComplaints = async (req: Request, res: Response, next: NextF
     ]);
 
     return sendSuccess(res, {
-      data: complaints,
+      complaints,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) { next(err); }
@@ -200,7 +225,7 @@ export const wardCouncillorRespond = async (req: Request, res: Response, next: N
 
     const councillor = await prisma.user.findUnique({
       where: { id: councillorId },
-      select: { wardId: true },
+      // select: { wardId: true },
     });
 
     const complaint = await prisma.complaint.findUnique({ where: { id } });
@@ -208,8 +233,8 @@ export const wardCouncillorRespond = async (req: Request, res: Response, next: N
     if (!complaint) return sendError(res, 'Complaint not found', 'NOT_FOUND', null, 404);
 
     // Enforce ward scope
-    if (complaint.wardId !== councillor?.wardId) {
-      return sendError(res, 'This complaint does not belong to your ward', 'FORBIDDEN', null, 403);
+    if (complaint.assignedToId !== councillorId) {
+      return sendError(res, 'This complaint does not belong to you', 'FORBIDDEN', null, 403);
     }
 
     const response = await prisma.complaintResponse.create({
@@ -434,6 +459,151 @@ export const adminRespond = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
+
+
+/**
+ * PATCH /api/v1/complaints/admin/:id
+ * LGA Admin updates a complaint — assignment, status, or both in one call.
+ * Both fields are optional; send only what's changing. Sending both at once
+ * (e.g. assigning AND immediately setting status) is exactly the "happens
+ * at the same time" case this merge is for.
+ */
+export const updateComplaintAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    let { id } = req.params;
+    if (Array.isArray(id)) id = id[0];
+    const adminId = req.user!.id;
+    const { assignedToId, status, resolutionNote } = req.body;
+
+    if (!assignedToId && !status) {
+      return sendError(res, "Provide assignedToId, status, or both", "BAD_REQUEST", null, 400);
+    }
+
+    const complaint = await prisma.complaint.findUnique({ where: { id } });
+    if (!complaint) return sendError(res, "Complaint not found", "NOT_FOUND", null, 404);
+
+    if (complaint.status === "closed") {
+      return sendError(res, "Closed complaints cannot be updated", "BAD_REQUEST", null, 400);
+    }
+    if (assignedToId && ["resolved", "closed"].includes(complaint.status)) {
+      return sendError(res, "Cannot reassign a resolved or closed complaint", "BAD_REQUEST", null, 400);
+    }
+
+    let assignee: { id: string; firstName: string; lastName: string; role: string } | null = null;
+
+    // ── Validate assignee, if one was provided ──────────────
+    if (assignedToId) {
+      assignee = await prisma.user.findUnique({
+        where: { id: assignedToId, isActive: true },
+        select: { id: true, firstName: true, lastName: true, role: true },
+      });
+      if (!assignee) return sendError(res, "Assignee not found or inactive", "NOT_FOUND", null, 404);
+
+      const allowedAssigneeRoles = ["ward_councillor", "field_officer", "lga_admin"];
+      if (!allowedAssigneeRoles.includes(assignee.role)) {
+        return sendError(res, "This user cannot be assigned complaints", "BAD_REQUEST", null, 400);
+      }
+    }
+
+    // ── Build the update ─────────────────────────────────────
+    const data: Record<string, unknown> = {};
+    if (assignedToId) {
+      data.assignedToId = assignedToId;
+      data.assignedAt = new Date();
+      // Assigning without an explicit status bump moves it to "assigned" by default —
+      // this is the one-click case. An explicit status in the same request wins.
+      if (!status) data.status = "assigned";
+    }
+    if (status) {
+      data.status = status;
+      if (resolutionNote) data.resolutionNote = resolutionNote;
+      if (status === "resolved") data.resolvedAt = new Date();
+    }
+
+    // ── Everything that must succeed or fail together, atomically ──
+    const { updated, assigneeSnapshot } = await prisma.$transaction(async (tx) => {
+      const updated = await tx.complaint.update({
+        where: { id },
+        data,
+        include: {
+          assignedTo: { select: { id: true, firstName: true, lastName: true, role: true, email: true, phone: true } },
+          raisedBy: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          ward: { select: { id: true, name: true } },
+        },
+      });
+
+      if (assignedToId) {
+        await tx.auditLog.create({
+          data: {
+            action: "complaint_assigned",
+            entity: "Complaint",
+            entityId: id,
+            userId: adminId,
+            details: { assignedToId, assigneeName: `${assignee!.firstName} ${assignee!.lastName}` },
+            ipAddress: getIp(req),
+          },
+        });
+      }
+      if (status) {
+        await tx.auditLog.create({
+          data: {
+            action: "complaint_resolved",
+            entity: "Complaint",
+            entityId: id,
+            userId: adminId,
+            details: { status, resolutionNote },
+            ipAddress: getIp(req),
+          },
+        });
+      }
+
+      return { updated, assigneeSnapshot: assignee };
+    });
+
+    // ── Notify — never let this break the response ────────────
+    try {
+      if (assignedToId && updated.assignedTo) {
+        await notify({
+          userId: updated.assignedTo.id,
+          to: { phone: updated.assignedTo.phone, email: updated.assignedTo.email },
+          templateKey: "complaint.ticketAssigned",
+          vars: {
+            ticket_number: updated.ticketNumber,
+            complaint_title: updated.title,
+            complaint_category: updated.category,
+          },
+          channels: ["sms", "email"],
+        });
+      }
+      if (status === "resolved" && updated.raisedBy) {
+        await notify({
+          userId: updated.raisedBy.id,
+          to: { phone: updated.raisedBy.phone, email: updated.raisedBy.email },
+          templateKey: "complaint.ticketResolved",
+          vars: {
+            ticket_number: updated.ticketNumber,
+            complaint_title: updated.title,
+            resolution_note: resolutionNote ?? "",
+          },
+          channels: ["sms", "email"],
+        });
+      }
+    } catch (notifyErr) {
+      console.error("[updateComplaintAdmin] notify() failed, continuing anyway:", notifyErr);
+    }
+
+    const message =
+      assignedToId && status
+        ? `Complaint assigned to ${assignee!.firstName} ${assignee!.lastName} and marked ${status}`
+        : assignedToId
+          ? `Complaint assigned to ${assignee!.firstName} ${assignee!.lastName}`
+          : `Complaint status updated to ${status}`;
+
+    return sendSuccess(res, updated, message);
+  } catch (err) {
+    next(err);
+  }
+};
 // ─────────────────────────────────────────────────────────────
 // STATS — LGA Admin / Chairman dashboard widget
 // ─────────────────────────────────────────────────────────────

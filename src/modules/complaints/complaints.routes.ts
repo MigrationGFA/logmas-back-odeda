@@ -331,7 +331,7 @@ router.get(
  *           type: string
  *           format: uuid
  *     responses:
- *       200:
+ *       200:`
  *         description: Complaint details retrieved
  *       404:
  *         description: Complaint not found

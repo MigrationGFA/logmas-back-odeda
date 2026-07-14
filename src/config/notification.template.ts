@@ -5,21 +5,23 @@
 // ============================================================
 // Usage: interpolate(templates.soo.invoiceGenerated.sms, { applicant_name: "John", ... })
 
-export const interpolate = (template: string, vars: Record<string, string>): string => {
+export const interpolate = (
+  template: string,
+  vars: Record<string, string>,
+): string => {
   return Object.entries(vars).reduce(
-    (str, [key, val]) => str.replaceAll(`{{${key}}}`, val ?? ''),
-    template
+    (str, [key, val]) => str.replaceAll(`{{${key}}}`, val ?? ""),
+    template,
   );
 };
 
-const BASE_URL = process.env.APP_URL ?? 'https://ijebunortheastlga.gov.ng';
+const BASE_URL = process.env.APP_URL ?? "https://ijebunortheastlga.gov.ng";
 
 // ============================================================
 // 1. STATE OF ORIGIN (SOO)
 // ============================================================
 
 export const sooTemplates = {
-
   // Stage 1 — Invoice Generated / Payment Pending
   invoiceGenerated: {
     sms: `Hello {{applicant_name}}, your Ijebu North East SOO application (#{{application_id}}) has been received. Please pay the processing fee of {{payment_amount}} to initiate review: {{checkout_link}}`,
@@ -239,7 +241,6 @@ export const sooTemplates = {
 // ============================================================
 
 export const permitTemplates = {
-
   // Stage 1 — Invoice Generated
   invoiceGenerated: {
     sms: `Hello, your Trade Permit fee of {{payment_amount}} for {{business_name}} is pending. Securely pay online to start review: {{checkout_link}}`,
@@ -402,7 +403,6 @@ export const permitTemplates = {
 // ============================================================
 
 export const complaintTemplates = {
-
   // Stage 1 — Ticket Opened (Citizen)
   ticketOpened: {
     emailSubject: `Ticket Opened: #{{ticket_number}} - {{complaint_title}}`,
@@ -493,7 +493,6 @@ export const complaintTemplates = {
 // ============================================================
 
 export const accountTemplates = {
-
   // Stage 1 — Password Reset
   passwordReset: {
     emailSubject: `Reset your Ijebu North East Portal Password`,
@@ -541,6 +540,28 @@ export const accountTemplates = {
 </body>
 </html>`,
   },
+  // Add to accountTemplates in src/notifications/templates/index.ts,
+  // alongside passwordReset and accountSuspended.
+
+  passwordChanged: {
+    sms: `Hello {{applicant_name}}, your Ijebu North East portal password was just changed. If this wasn't you, contact the LGA Secretariat immediately.`,
+
+    emailSubject: `Your Password Was Changed`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #1a4731;">
+    <h2>Password Changed</h2>
+    <p>Dear <strong>{{applicant_name}}</strong>,</p>
+    <p>This confirms that the password for your Ijebu North East portal account was just changed.</p>
+    <div style="background: #fef3c7; border-radius: 8px; padding: 16px; font-size: 13px; margin-top: 16px;">
+      <p style="margin: 0;"><strong>Didn't do this?</strong> Contact the LGA Secretariat immediately — your account may be compromised.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
 
   // Welcome — new staff account created
   welcomeStaff: {
@@ -577,10 +598,10 @@ export const accountTemplates = {
 // ============================================================
 
 export const NotificationTemplates = {
-  soo:      sooTemplates,
-  permit:   permitTemplates,
+  soo: sooTemplates,
+  permit: permitTemplates,
   complaint: complaintTemplates,
-  account:  accountTemplates,
+  account: accountTemplates,
 };
 
 export type TemplateVars = Record<string, string>;

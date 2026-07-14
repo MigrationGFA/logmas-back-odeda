@@ -1,12 +1,15 @@
 // auth.controller.ts
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { prisma } from "../../utils/prisma";
 import { generateAccessToken, generateRefreshToken } from "../../utils/jwt";
 import { sendSuccess, sendError } from "../../utils/response";
 import { OAuth2Client } from "google-auth-library";
 import jwt from "jsonwebtoken";
 import env from "../../config/env";
+import { notify } from "../notification/notification.service";
+import { getIp } from "../complaints/complaints.controller";
 
 export const register = async (
   req: Request,
@@ -389,6 +392,195 @@ export const updateUserProfile = async (
       updatedUser, 
       "Settings and profile updated successfully"
     );
+  } catch (err) {
+    next(err);
+  }
+};
+
+// src/auth/password.controller.ts
+//
+// TODO: fix import paths (prisma, sendSuccess/sendError, notify) to match your project
+
+
+const RESET_TOKEN_TTL_MINUTES = 30;
+
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// POST /api/v1/auth/forgot-password
+// body: { email }
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email } = req.body;
+    if (!email) return sendError(res, "Email is required", "BAD_REQUEST", null, 400);
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    // Per your spec: the account must exist — explicit error if not, not the usual
+    // "always say success" security pattern. Worth knowing this lets someone probe
+    // which emails have accounts; acceptable tradeoff if that's intentional here.
+    if (!user) {
+      return sendError(res, "No account found with that email", "NOT_FOUND", null, 404);
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: tokenHash,
+        passwordResetTokenExpiresAt: expiresAt,
+      },
+    });
+
+    const resetLink = `${process.env.PAYSTACK_CALLBACK_URL}/reset-password?token=${rawToken}`; // TODO: confirm your frontend route
+
+    try {
+      await notify({
+        userId: user.id,
+        to: { email: user.email, phone: user.phone ?? undefined },
+        templateKey: "account.passwordReset",
+        vars: {
+          reset_link: resetLink,
+          expiration_time: `${RESET_TOKEN_TTL_MINUTES} minutes`,
+        },
+        channels: ["email"], // sms omitted — no sms variant on this template currently
+      });
+    } catch (notifyErr) {
+      console.error("[forgotPassword] notify() failed, continuing anyway:", notifyErr);
+    }
+
+    return sendSuccess(res, { message: "Password reset link sent to your email" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/v1/auth/reset-password
+// body: { token, newPassword, confirmPassword }
+export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { token, newPassword, confirmPassword } = req.body;
+
+    if (!token || !newPassword || !confirmPassword) {
+      return sendError(res, "token, newPassword, and confirmPassword are required", "BAD_REQUEST", null, 400);
+    }
+    if (newPassword !== confirmPassword) {
+      return sendError(res, "Passwords do not match", "BAD_REQUEST", null, 400);
+    }
+    if (newPassword.length < 8) {
+      return sendError(res, "Password must be at least 8 characters", "BAD_REQUEST", null, 400);
+    }
+
+    const tokenHash = hashToken(token);
+    const user = await prisma.user.findUnique({ where: { passwordResetToken: tokenHash } });
+
+    if (!user || !user.passwordResetTokenExpiresAt || user.passwordResetTokenExpiresAt < new Date()) {
+      return sendError(res, "Reset link is invalid or has expired", "BAD_REQUEST", null, 400);
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        passwordResetToken: null,
+        passwordResetTokenExpiresAt: null,
+        passwordResetRequired: false,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: "user_updated",
+        entity: "User",
+        entityId: user.id,
+        userId: user.id,
+        details: { action: "password_reset_via_link" },
+        ipAddress: getIp(req), // TODO: confirm this util exists in this file's scope
+      },
+    });
+
+    try {
+      await notify({
+        userId: user.id,
+        to: { email: user.email, phone: user.phone ?? undefined },
+        templateKey: "account.passwordChanged",
+        vars: { applicant_name: user.firstName },
+        channels: ["email", "sms"],
+      });
+    } catch (notifyErr) {
+      console.error("[resetPassword] notify() failed, continuing anyway:", notifyErr);
+    }
+
+    return sendSuccess(res, { message: "Password has been reset successfully. You can now log in." });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/v1/auth/change-password
+// Requires auth. body: { oldPassword, newPassword, confirmPassword }
+export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const { oldPassword, newPassword, confirmPassword } = req.body;
+
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      return sendError(res, "oldPassword, newPassword, and confirmPassword are required", "BAD_REQUEST", null, 400);
+    }
+    if (newPassword !== confirmPassword) {
+      return sendError(res, "New passwords do not match", "BAD_REQUEST", null, 400);
+    }
+    if (newPassword.length < 8) {
+      return sendError(res, "Password must be at least 8 characters", "BAD_REQUEST", null, 400);
+    }
+    if (oldPassword === newPassword) {
+      return sendError(res, "New password must be different from current password", "BAD_REQUEST", null, 400);
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return sendError(res, "User not found", "NOT_FOUND", null, 404);
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return sendError(res, "Current password is incorrect", "BAD_REQUEST", null, 400);
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword, passwordResetRequired: false },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: "user_updated",
+        entity: "User",
+        entityId: userId,
+        userId,
+        details: { action: "password_changed" },
+        ipAddress: getIp(req),
+      },
+    });
+
+    try {
+      await notify({
+        userId: user.id,
+        to: { email: user.email, phone: user.phone ?? undefined },
+        templateKey: "account.passwordChanged",
+        vars: { applicant_name: user.firstName },
+        channels: ["email", "sms"],
+      });
+    } catch (notifyErr) {
+      console.error("[changePassword] notify() failed, continuing anyway:", notifyErr);
+    }
+
+    return sendSuccess(res, { message: "Password changed successfully" });
   } catch (err) {
     next(err);
   }

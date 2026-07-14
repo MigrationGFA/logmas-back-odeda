@@ -206,6 +206,9 @@ model User {
   agent           User?   @relation("AgentOfficers", fields: [agentId], references: [id])
   managedOfficers User[]  @relation("AgentOfficers")
 
+  passwordResetToken          String?   @unique
+  passwordResetTokenExpiresAt DateTime?
+
   // // Field officer pathing
   // supervisorId  String?
   // supervisor    User?   @relation("SupervisorOfficers", fields: [supervisorId], references: [id])

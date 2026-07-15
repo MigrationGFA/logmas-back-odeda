@@ -43,10 +43,10 @@ export const createStaffSchema = z
   })
   .refine(
     (data) => {
-      if (data.role === "ward_councillor" && !data.wardId) return false;
+      if ((data.role === "ward_councillor" || data.role === "field_officer") && !data.wardId) return false;
       return true;
     },
-    { message: "wardId is required when creating a ward councillor" },
+    { message: "wardId is required when creating a ward councillor and field officer" },
   );
 // .refine((data) => {
 //   if ((data.role === 'field_officer' || data.role === 'agent') && !data.contractorId) return false;

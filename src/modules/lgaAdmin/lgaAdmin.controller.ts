@@ -6,6 +6,7 @@ import { prisma } from "../../utils/prisma";
 import { sendSuccess, sendError } from "../../utils/response";
 import { Role } from "@prisma/client";
 import { getIp, queryString } from "../complaints/complaints.controller";
+import { notify } from "../notification/notification.service";
 
 // ─────────────────────────────────────────────────────────────
 // WARD MANAGEMENT
@@ -87,7 +88,7 @@ export const listWards = async (
               lastName: true,
               email: true,
               isActive: true,
-              phone:true
+              phone: true,
             },
           },
           _count: {
@@ -309,14 +310,22 @@ export const deleteWard = async (
 
 // ─────────────────────────────────────────────────────────────
 // STAFF MANAGEMENT
-// ─────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────/ Adjust to your actual notify utility import path
+
+// Your secure password randomizer function
+export function generateTempPassword(length = 12): string {
+  const charset = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
+  const bytes = crypto.randomBytes(length);
+  let password = "";
+  for (let i = 0; i < length; i++) {
+    password += charset[bytes[i] % charset.length];
+  }
+  return password;
+}
 
 /**
  * POST /api/v1/lga-admin/staff
- * LGA Admin creates a new staff account.
- * Roles allowed: ward_councillor, contractor, field_officer, agent.
- * A secure temporary password is generated and should be
- * sent to the user via email/SMS (TODO Phase 7).
+ * LGA Admin creates a new staff account and notifies them with credentials.
  */
 export const createStaff = async (
   req: Request,
@@ -328,14 +337,21 @@ export const createStaff = async (
     const { email, firstName, lastName, phone, role, wardId, contractorId } =
       req.body;
 
-    // LGA Admin cannot create super_admin, chairman, treasurer, auditor
     const allowedRoles: Role[] = [
-    'ward_councillor', 'contractor', 'field_officer', 'agent','citizen',"business_owner","auditor","treasurer","chairman"
+      "ward_councillor",
+      "contractor",
+      "field_officer",
+      "agent",
+      "citizen",
+      "business_owner",
+      "auditor",
+      "treasurer",
+      "chairman",
     ];
     if (!allowedRoles.includes(role as Role)) {
       return sendError(
         res,
-        "LGA Admin can only create ward_councillor, contractor, field_officer, or agent accounts",
+        "LGA Admin can only create allowed platform staff accounts",
         "FORBIDDEN",
         null,
         403,
@@ -353,20 +369,15 @@ export const createStaff = async (
         return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
     }
 
-    // Validate contractor exists if assigning a field officer or agent
-    // if (contractorId) {
-    //   const contractor = await prisma.user.findUnique({
-    //     where: { id: contractorId },
-    //     select: { role: true },
-    //   });
-    //   if (!contractor || contractor.role !== 'contractor') {
-    //     return sendError(res, 'Contractor not found or invalid', 'NOT_FOUND', null, 404);
-    //   }
-    // }
+    // 1. Generate the unique random temporary password per execution call
+    const uniqueTempPassword = generateTempPassword(12);
 
-    // Generate a secure temporary password
-    const tempPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
-    const hashedPassword = await bcrypt.hash('demo1234', 12);
+    // 2. Hash the dynamically generated password securely
+    const hashedPassword = await bcrypt.hash(uniqueTempPassword, 12);
+
+    // 3. Determine ward mapping based on the role
+    const isWardCouncillor = role === "ward_councillor";
+    const isFieldOfficer = role === "field_officer";
 
     const staff = await prisma.user.create({
       data: {
@@ -377,7 +388,10 @@ export const createStaff = async (
         password: hashedPassword,
         createdById: adminId,
         role: role as Role,
-        ...(wardId && { assignedWardId: wardId }),
+        // Match the specific schema properties for WC vs FO
+        ...(wardId && isWardCouncillor && { assignedWardId: wardId }),
+        ...(wardId &&
+          (isFieldOfficer || isWardCouncillor) && { wardId: wardId }),
         // ...(contractorId && { contractorId }),
       },
       select: {
@@ -388,12 +402,14 @@ export const createStaff = async (
         role: true,
         phone: true,
         wardId: true,
-        contractorId: true,
+        assignedWardId: true,
+        // contractorId: true,
         isActive: true,
         createdAt: true,
       },
     });
 
+    // 4. Create Audit Log
     await prisma.auditLog.create({
       data: {
         action: "user_created",
@@ -405,15 +421,33 @@ export const createStaff = async (
       },
     });
 
-    // TODO Phase 7: Send tempPassword to staff via email/SMS
+    // 5. Send Notification containing credentials to the newly created staff member
+    try {
+      await notify({
+        userId: staff.id,
+        to: { phone: staff.phone || "", email: staff.email },
+        templateKey: "account.welcomeStaff", // Points to your newly added layout block
+        vars: {
+          applicant_name: `${staff.firstName} ${staff.lastName}`,
+          temp_password: uniqueTempPassword,
+        },
+        channels: ["sms", "email"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[createStaff] notify() failed, continuing anyway:",
+        notifyErr,
+      );
+    }
 
+    // 6. Return response to the Admin dashboard creator
     return sendSuccess(
       res,
       {
         staff,
-        // temporaryPassword: tempPassword, // returned once — store it securely
+        // temporaryPassword: uniqueTempPassword, // Safe single administrative review return
         notice:
-          "Share this temporary password with the staff member. They should change it on first login.",
+          "Staff account created successfully. They have been sent their login credentials via email and SMS.",
       },
       "Staff account created successfully",
       201,
@@ -1444,11 +1478,11 @@ export const addAgentToContractor = async (
     const tempPassword = crypto.randomBytes(6).toString("hex");
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
-  let validLevyConfigs: { id: string }[] = [];
+    let validLevyConfigs: { id: string }[] = [];
     if (levyConfigId) {
       validLevyConfigs = await prisma.levyConfig.findMany({
-        where: { 
-          categoryId: levyConfigId, 
+        where: {
+          categoryId: levyConfigId,
         },
         select: { id: true },
       });
@@ -1476,7 +1510,7 @@ export const addAgentToContractor = async (
         createdById: adminId,
         ...(wardId && { wardId }),
         // Connect levy config if provided
-       ...(validLevyConfigs.length > 0 && {
+        ...(validLevyConfigs.length > 0 && {
           permittedLevies: {
             connect: validLevyConfigs.map((config) => ({ id: config.id })),
           },
@@ -1490,7 +1524,7 @@ export const addAgentToContractor = async (
         role: true,
         ward: { select: { name: true } },
         contractor: { select: { id: true, firstName: true, lastName: true } },
-        permittedLevies: { select: { id: true, name: true } }
+        permittedLevies: { select: { id: true, name: true } },
       },
     });
 

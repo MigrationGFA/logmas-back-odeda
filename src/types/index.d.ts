@@ -8,6 +8,7 @@ declare global {
         role: Role;
         email: string;
         wardId?: string | null;
+        tokenVersion: number;
       };
     }
   }

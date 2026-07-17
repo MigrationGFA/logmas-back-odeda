@@ -156,6 +156,7 @@ model User {
   firstName String
   lastName  String
   role      Role    @default(citizen)
+  tokenVersion Int @default(0)
 
   // Suspension Infrastructure
   isActive         Boolean   @default(true)

@@ -563,6 +563,48 @@ export const accountTemplates = {
 </html>`,
   },
 
+  
+accountReactivated: {
+  sms: `Hello {{applicant_name}}, your Ijebu North East portal account has been reactivated. You can now log in as usual.`,
+
+  emailSubject: `Your Account Has Been Reactivated`,
+  emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #15803d;">
+    <h2 style="color: #15803d;">✓ Account Reactivated</h2>
+    <p>Dear <strong>{{applicant_name}}</strong>,</p>
+    <p>Your Ijebu North East portal account has been reactivated. You may log in as usual.</p>
+  </div>
+</body>
+</html>`,
+},
+
+passwordResetByAdmin: {
+  sms: `Hello {{applicant_name}}, your LOGMAS password was reset by an administrator. Temporary password: {{temp_password}}. You must change it on next login.`,
+
+  emailSubject: `Your Password Was Reset`,
+  emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #6366f1;">
+    <h2>Password Reset by Administrator</h2>
+    <p>Dear <strong>{{applicant_name}}</strong>,</p>
+    <p>An administrator has reset your password. Use the temporary password below to log in — you'll be required to set a new one immediately.</p>
+    <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+      <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px;">Temporary Password</div>
+      <div style="font-family: monospace; font-size: 22px; font-weight: bold; letter-spacing: 3px; color: #1a4731;">{{temp_password}}</div>
+    </div>
+    <div style="background: #fef3c7; border-radius: 8px; padding: 16px; font-size: 13px;">
+      <p style="margin: 0;"><strong>Didn't request this?</strong> Contact the LGA Secretariat immediately.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+},
+
   // Welcome — new staff account created
   welcomeStaff: {
     sms: `Welcome to LOGMAS, {{applicant_name}}. Your account has been created. Temporary password: {{temp_password}}. Login at: ${BASE_URL}/login — Change your password immediately.`,

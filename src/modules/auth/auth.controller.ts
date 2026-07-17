@@ -93,43 +93,56 @@ export const login = async (
       where: { email, deletedAt: null },
     });
 
-    // console.log(user, "⛔");
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return sendError(
         res,
-        "Invalid verification credentials credentials provided",
+        "Invalid credentials provided",
         "UNAUTHORIZED",
         null,
         401,
       );
     }
 
+    // Check if account is suspended
+    if (!user.isActive) {
+      return sendError(
+        res,
+        "Account suspended. Contact LGA Secretariat.",
+        "SUSPENDED",
+        null,
+        403,
+      );
+    }
+
+    // Get fresh tokenVersion
+    const tokenVersion = user.tokenVersion;
+
     const accessToken = generateAccessToken({
       id: user.id,
       role: user.role,
       email: user.email,
       wardId: user.wardId,
+      tokenVersion,
     });
     const refreshToken = generateRefreshToken({ id: user.id });
+    console.log(accessToken, "❤️");
 
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        lastLoginAt: new Date(),
-      },
+      data: { lastLoginAt: new Date() },
     });
 
     return sendSuccess(res, {
       accessToken,
       refreshToken,
       user: {
-        // ← THIS was missing
         id: user.id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
         isActive: user.isActive,
+        passwordResetRequired: user.passwordResetRequired, // NEW
       },
     });
   } catch (err) {
@@ -223,6 +236,8 @@ export const googleLogin = async (
       id: user.id,
       role: user.role,
       email: user.email,
+      // wardId: user.wardId,
+      tokenVersion: user.tokenVersion, // NEW
     });
     const refreshToken = generateRefreshToken({ id: user.id });
 
@@ -266,6 +281,7 @@ export const refreshToken = async (
       id: user.id,
       role: user.role,
       email: user.email,
+      tokenVersion: user.tokenVersion, // NEW
     });
     return sendSuccess(res, { accessToken });
   } catch (err) {
@@ -279,7 +295,6 @@ export const refreshToken = async (
   }
 };
 
-
 // PUT /api/v1/users/profile
 // PUT /api/v1/users/profile
 export const updateUserProfile = async (
@@ -290,56 +305,95 @@ export const updateUserProfile = async (
   try {
     // 1. Ensure the session contains a valid user context
     if (!req.user || !req.user.id) {
-      return sendError(res, "Unauthorized context binding", "UNAUTHORIZED", null, 401);
+      return sendError(
+        res,
+        "Unauthorized context binding",
+        "UNAUTHORIZED",
+        null,
+        401,
+      );
     }
 
     const userId = req.user.id;
-    const { 
-      firstName, 
-      lastName, 
+    const {
+      firstName,
+      lastName,
       phone,
       notifyByEmail,
       notifyBySms,
-      notifyByInApp
+      notifyByInApp,
     } = req.body;
 
     // 2. Input validation checks for text fields
     if (firstName !== undefined && typeof firstName !== "string") {
-      return sendError(res, "First name must be a valid string", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "First name must be a valid string",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (lastName !== undefined && typeof lastName !== "string") {
-      return sendError(res, "Last name must be a valid string", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "Last name must be a valid string",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (phone !== undefined && typeof phone !== "string") {
-      return sendError(res, "Phone number must be a valid string", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "Phone number must be a valid string",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     // 3. Input validation checks for notification booleans
     if (notifyByEmail !== undefined && typeof notifyByEmail !== "boolean") {
-      return sendError(res, "notifyByEmail must be a boolean value", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "notifyByEmail must be a boolean value",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (notifyBySms !== undefined && typeof notifyBySms !== "boolean") {
-      return sendError(res, "notifyBySms must be a boolean value", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "notifyBySms must be a boolean value",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (notifyByInApp !== undefined && typeof notifyByInApp !== "boolean") {
-      return sendError(res, "notifyByInApp must be a boolean value", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "notifyByInApp must be a boolean value",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     // 4. Duplicate phone number check - ONLY if phone is provided AND not empty
     if (phone && phone.trim() !== "") {
       const trimmedPhone = phone.trim();
-      
+
       const duplicatePhone = await prisma.user.findFirst({
         where: {
           phone: trimmedPhone,
           id: { not: userId },
           // Exclude users with empty/null phone numbers
           NOT: {
-            OR: [
-              { phone: null },
-              { phone: "" }
-            ]
-          }
+            OR: [{ phone: null }, { phone: "" }],
+          },
         },
       });
 
@@ -349,7 +403,7 @@ export const updateUserProfile = async (
           "This phone number is already registered to another account",
           "CONFLICT",
           null,
-          409
+          409,
         );
       }
     }
@@ -388,9 +442,9 @@ export const updateUserProfile = async (
 
     // 7. Respond with the clean updated model profile
     return sendSuccess(
-      res, 
-      updatedUser, 
-      "Settings and profile updated successfully"
+      res,
+      updatedUser,
+      "Settings and profile updated successfully",
     );
   } catch (err) {
     next(err);
@@ -401,7 +455,6 @@ export const updateUserProfile = async (
 //
 // TODO: fix import paths (prisma, sendSuccess/sendError, notify) to match your project
 
-
 const RESET_TOKEN_TTL_MINUTES = 30;
 
 function hashToken(token: string): string {
@@ -410,22 +463,35 @@ function hashToken(token: string): string {
 
 // POST /api/v1/auth/forgot-password
 // body: { email }
-export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
+export const forgotPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const { email } = req.body;
-    if (!email) return sendError(res, "Email is required", "BAD_REQUEST", null, 400);
+    if (!email)
+      return sendError(res, "Email is required", "BAD_REQUEST", null, 400);
 
     const user = await prisma.user.findUnique({ where: { email } });
     // Per your spec: the account must exist — explicit error if not, not the usual
     // "always say success" security pattern. Worth knowing this lets someone probe
     // which emails have accounts; acceptable tradeoff if that's intentional here.
     if (!user) {
-      return sendError(res, "No account found with that email", "NOT_FOUND", null, 404);
+      return sendError(
+        res,
+        "No account found with that email",
+        "NOT_FOUND",
+        null,
+        404,
+      );
     }
 
     const rawToken = crypto.randomBytes(32).toString("hex");
     const tokenHash = hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+    const expiresAt = new Date(
+      Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000,
+    );
 
     await prisma.user.update({
       where: { id: user.id },
@@ -449,10 +515,15 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
         channels: ["email"], // sms omitted — no sms variant on this template currently
       });
     } catch (notifyErr) {
-      console.error("[forgotPassword] notify() failed, continuing anyway:", notifyErr);
+      console.error(
+        "[forgotPassword] notify() failed, continuing anyway:",
+        notifyErr,
+      );
     }
 
-    return sendSuccess(res, { message: "Password reset link sent to your email" });
+    return sendSuccess(res, {
+      message: "Password reset link sent to your email",
+    });
   } catch (err) {
     next(err);
   }
@@ -460,25 +531,53 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
 // POST /api/v1/auth/reset-password
 // body: { token, newPassword, confirmPassword }
-export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+export const resetPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const { token, newPassword, confirmPassword } = req.body;
 
     if (!token || !newPassword || !confirmPassword) {
-      return sendError(res, "token, newPassword, and confirmPassword are required", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "token, newPassword, and confirmPassword are required",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (newPassword !== confirmPassword) {
       return sendError(res, "Passwords do not match", "BAD_REQUEST", null, 400);
     }
     if (newPassword.length < 8) {
-      return sendError(res, "Password must be at least 8 characters", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "Password must be at least 8 characters",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const tokenHash = hashToken(token);
-    const user = await prisma.user.findUnique({ where: { passwordResetToken: tokenHash } });
+    const user = await prisma.user.findUnique({
+      where: { passwordResetToken: tokenHash },
+    });
 
-    if (!user || !user.passwordResetTokenExpiresAt || user.passwordResetTokenExpiresAt < new Date()) {
-      return sendError(res, "Reset link is invalid or has expired", "BAD_REQUEST", null, 400);
+    if (
+      !user ||
+      !user.passwordResetTokenExpiresAt ||
+      user.passwordResetTokenExpiresAt < new Date()
+    ) {
+      return sendError(
+        res,
+        "Reset link is invalid or has expired",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
@@ -513,10 +612,15 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         channels: ["email", "sms"],
       });
     } catch (notifyErr) {
-      console.error("[resetPassword] notify() failed, continuing anyway:", notifyErr);
+      console.error(
+        "[resetPassword] notify() failed, continuing anyway:",
+        notifyErr,
+      );
     }
 
-    return sendSuccess(res, { message: "Password has been reset successfully. You can now log in." });
+    return sendSuccess(res, {
+      message: "Password has been reset successfully. You can now log in.",
+    });
   } catch (err) {
     next(err);
   }
@@ -524,22 +628,50 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 
 // PATCH /api/v1/auth/change-password
 // Requires auth. body: { oldPassword, newPassword, confirmPassword }
-export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
+export const changePassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const userId = req.user!.id;
     const { oldPassword, newPassword, confirmPassword } = req.body;
 
     if (!oldPassword || !newPassword || !confirmPassword) {
-      return sendError(res, "oldPassword, newPassword, and confirmPassword are required", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "oldPassword, newPassword, and confirmPassword are required",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (newPassword !== confirmPassword) {
-      return sendError(res, "New passwords do not match", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "New passwords do not match",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (newPassword.length < 8) {
-      return sendError(res, "Password must be at least 8 characters", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "Password must be at least 8 characters",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
     if (oldPassword === newPassword) {
-      return sendError(res, "New password must be different from current password", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "New password must be different from current password",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -547,14 +679,32 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
 
     const isMatch = await bcrypt.compare(oldPassword, user.password);
     if (!isMatch) {
-      return sendError(res, "Current password is incorrect", "BAD_REQUEST", null, 400);
+      return sendError(
+        res,
+        "Current password is incorrect",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     await prisma.user.update({
       where: { id: userId },
-      data: { password: hashedPassword, passwordResetRequired: false },
+      data: {
+        password: hashedPassword,
+        passwordResetRequired: false,
+        tokenVersion: { increment: 1 },
+      },
+    });
+
+        const newToken = generateAccessToken({
+      id: userId,
+      role: req.user!.role,
+      email: req.user!.email,
+      wardId: req.user!.wardId,
+      tokenVersion: (await prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true } }))!.tokenVersion,
     });
 
     await prisma.auditLog.create({
@@ -577,10 +727,13 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
         channels: ["email", "sms"],
       });
     } catch (notifyErr) {
-      console.error("[changePassword] notify() failed, continuing anyway:", notifyErr);
+      console.error(
+        "[changePassword] notify() failed, continuing anyway:",
+        notifyErr,
+      );
     }
 
-    return sendSuccess(res, { message: "Password changed successfully" });
+    return sendSuccess(res, { message: "Password changed successfully",accessToken: newToken, });
   } catch (err) {
     next(err);
   }

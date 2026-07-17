@@ -666,16 +666,10 @@ export const toggleStaffStatus = async (
   try {
     const { id } = req.params;
     const { id: requesterId, role: requesterRole } = req.user!;
-    const { reason } = req.body; // optional suspension reason
+    const { reason } = req.body;
 
     if (id === requesterId) {
-      return sendError(
-        res,
-        "You cannot suspend your own account",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
+      return sendError(res, 'You cannot suspend your own account', 'BAD_REQUEST', null, 400);
     }
 
     const target = await prisma.user.findUnique({
@@ -686,38 +680,41 @@ export const toggleStaffStatus = async (
         role: true,
         firstName: true,
         lastName: true,
+        email: true,
+        phone: true,
         deletedAt: true,
       },
     });
 
     if (!target || target.deletedAt) {
-      return sendError(res, "Account not found", "NOT_FOUND", null, 404);
+      return sendError(res, 'Account not found', 'NOT_FOUND', null, 404);
     }
 
     if (
-      requesterRole === "lga_admin" &&
-      ["super_admin", "lga_admin"].includes(target.role)
+      requesterRole === 'lga_admin' &&
+      ['super_admin', 'lga_admin'].includes(target.role)
     ) {
-      return sendError(
-        res,
-        "You cannot suspend this account",
-        "FORBIDDEN",
-        null,
-        403,
-      );
+      return sendError(res, 'You cannot suspend this account', 'FORBIDDEN', null, 403);
     }
 
-    const nowActive = !target.isActive;
+    const nowActive = !target.isActive; // toggling
+
+    // Build update data
+    const updateData: any = {
+      isActive: nowActive,
+      suspendedAt: nowActive ? null : new Date(),
+      suspendedById: nowActive ? null : requesterId,
+      suspensionReason: nowActive ? null : (reason ?? null),
+    };
+
+    // If suspending, increment tokenVersion to invalidate all sessions
+    if (!nowActive) {
+      updateData.tokenVersion = { increment: 1 };
+    }
 
     const updated = await prisma.user.update({
       where: { id: String(id) },
-      data: {
-        isActive: nowActive,
-        // Set suspension metadata when suspending, clear when reactivating
-        suspendedAt: nowActive ? null : new Date(),
-        suspendedById: nowActive ? null : requesterId,
-        suspensionReason: nowActive ? null : (reason ?? null),
-      },
+      data: updateData,
       select: {
         id: true,
         email: true,
@@ -725,29 +722,71 @@ export const toggleStaffStatus = async (
         isActive: true,
         suspendedAt: true,
         suspensionReason: true,
+        tokenVersion: true,
       },
     });
 
+    // Audit log
     await prisma.auditLog.create({
       data: {
-        action: "user_updated",
-        entity: "User",
+        action: 'user_updated',
+        entity: 'User',
         entityId: String(id),
         userId: requesterId,
         details: {
-          action: nowActive ? "account_reactivated" : "account_suspended",
+          action: nowActive ? 'account_reactivated' : 'account_suspended',
           reason: reason ?? null,
         },
         ipAddress: getIp(req),
       },
     });
 
-    // TODO Phase 7: Notify user of suspension/reactivation via email/SMS
+    // --- Send notifications ---
+    const fullName = `${target.firstName} ${target.lastName}`;
+
+    if (!nowActive) {
+      // Suspension
+      try {
+      await notify({
+        userId: target.id,
+        to: { email: target.email, phone: target.phone ?? "" },
+        templateKey: "account.accountSuspended", // from your templates
+        vars: {
+        applicant_name: fullName,
+        suspension_reason: reason ?? "No specific reason provided.",
+        },
+        channels: ["email", "sms"],
+      });
+      } catch (notifyErr) {
+      console.error(
+        "[toggleStaffStatus] notify() failed for suspension, continuing anyway:",
+        notifyErr,
+      );
+      }
+    } else {
+      // Reactivation
+      try {
+      await notify({
+        userId: target.id,
+        to: { email: target.email, phone: target.phone ?? "" },
+        templateKey: "account.accountReactivated",
+        vars: {
+        applicant_name: fullName,
+        },
+        channels: ["email", "sms"],
+      });
+      } catch (notifyErr) {
+      console.error(
+        "[toggleStaffStatus] notify() failed for reactivation, continuing anyway:",
+        notifyErr,
+      );
+      }
+    }
 
     return sendSuccess(
       res,
       updated,
-      `Account ${nowActive ? "reactivated" : "suspended"} successfully`,
+      `Account ${nowActive ? 'reactivated' : 'suspended'} successfully`,
     );
   } catch (err) {
     next(err);
@@ -1008,6 +1047,7 @@ export const resetAccountPassword = async (
       select: {
         id: true,
         email: true,
+        phone: true,
         firstName: true,
         lastName: true,
         role: true,
@@ -1016,53 +1056,46 @@ export const resetAccountPassword = async (
     });
 
     if (!target || target.deletedAt) {
-      return sendError(res, "Account not found", "NOT_FOUND", null, 404);
+      return sendError(res, 'Account not found', 'NOT_FOUND', null, 404);
     }
 
-    // LGA Admin cannot reset super_admin or lga_admin passwords
     if (
-      requesterRole === "lga_admin" &&
-      ["super_admin", "lga_admin"].includes(target.role)
+      requesterRole === 'lga_admin' &&
+      ['super_admin', 'lga_admin'].includes(target.role)
     ) {
-      return sendError(
-        res,
-        "You cannot reset this account password",
-        "FORBIDDEN",
-        null,
-        403,
-      );
+      return sendError(res, 'You cannot reset this account password', 'FORBIDDEN', null, 403);
     }
 
-    // Prevent resetting own password via this endpoint
     if (id === requesterId) {
       return sendError(
         res,
-        "Use your profile settings to reset your own password",
-        "BAD_REQUEST",
+        'Use your profile settings to reset your own password',
+        'BAD_REQUEST',
         null,
         400,
       );
     }
 
-    const tempPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
+    const tempPassword = generateTempPassword(12); // using your helper
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
     await prisma.user.update({
       where: { id: String(id) },
       data: {
         password: hashedPassword,
-        passwordResetRequired: true, // forces user to change on next login
+        passwordResetRequired: true,
+        tokenVersion: { increment: 1 },   // invalidate existing sessions
       },
     });
 
     await prisma.auditLog.create({
       data: {
-        action: "user_updated",
-        entity: "User",
+        action: 'user_updated',
+        entity: 'User',
         entityId: String(id),
         userId: requesterId,
         details: {
-          action: "password_reset",
+          action: 'password_reset',
           resetBy: requesterId,
           targetEmail: target.email,
         },
@@ -1070,26 +1103,31 @@ export const resetAccountPassword = async (
       },
     });
 
-    // TODO Phase 7: Send tempPassword to target.email via Sendgrid
-    // await emailService.sendPasswordReset({
-    //   to:        target.email,
-    //   name:      `${target.firstName} ${target.lastName}`,
-    //   password:  tempPassword,
-    //   loginUrl:  process.env.APP_URL + '/login',
-    // });
-
-    // TODO Phase 7: Send tempPassword via Termii SMS
-    // await smsService.send({
-    //   to:      target.phone,
-    //   message: `Your LOGMAS password has been reset. Temporary password: ${tempPassword}. Change it immediately on login.`,
-    // });
+    // --- Send notifications ---
+    const fullName = `${target.firstName} ${target.lastName}`;
+    try {
+      await notify({
+        userId: target.id,
+        to: { email: target.email, phone: target.phone ?? '' },
+        templateKey: 'account.passwordResetByAdmin',
+        vars: {
+          applicant_name: fullName,
+          temp_password: tempPassword,
+        },
+        channels: ['email', 'sms'],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[resetAccountPassword] notify() failed, continuing anyway:",
+        notifyErr,
+      );
+    }
 
     return sendSuccess(res, {
-      message: `Password reset for ${target.firstName} ${target.lastName}`,
-      temporaryPassword: tempPassword, // return once — remove after Phase 7 email is wired
-      notice:
-        "Share this with the user securely. They must change it on next login.",
-      // TODO Phase 7: Remove temporaryPassword from response once email delivery is live
+      message: `Password reset for ${fullName}`,
+      // We keep the temporary password in response for development,
+      // but it's also sent via channels. Remove in production if desired.
+      temporaryPassword: tempPassword,
     });
   } catch (err) {
     next(err);

@@ -31,6 +31,7 @@ import dashboardRoutes from './modules/dashboard/dashboard.controller';
 import { errorHandler } from './middleware/error.middleware';
 import { swaggerDocument } from './config/swagger';
 import paymentRoutes from './modules/payment/payment.routes';
+import rateLimit from 'express-rate-limit';
 
 
 const app = express();
@@ -42,6 +43,41 @@ app.use(helmet({
 app.use(cors());
 app.use(morgan('dev'));
 // app.use(express.json());
+
+// 1. Global Limiter: General protection for all API routes (e.g., 100 requests per 15 mins)
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  message: {
+    status: "error",
+    error: {
+      code: "TOO_MANY_REQUESTS",
+      message: "Too many requests from this IP, please try again after 15 minutes.",
+      details: null,
+    },
+  },
+});
+
+// 2. Strict Auth Limiter: Protect login/register/password-reset from brute-force (e.g., 5 requests per 15 mins)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  max: 10, // Max 10 attempts per IP per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: "error",
+    error: {
+      code: "TOO_MANY_REQUESTS",
+      message: "Too many authentication attempts. Please wait 15 minutes before trying again.",
+      details: null,
+    },
+  },
+});
+
+// Apply global rate limiting to all requests
+app.use(globalLimiter);
 
 // Base Health-Check Endpoint
 app.get('/', (req, res) => {
@@ -56,6 +92,8 @@ app.get('/', (req, res) => {
 app.use('/public', express.static('public'));
 app.use("/api/v1/payments", paymentRoutes); // must come before express.json() below
 app.use(express.json());
+
+app.use('/api/v1/auth', authLimiter, authRoutes);
 
 // API Engine Base Routing Architecture
 app.use('/api/v1/auth', authRoutes);

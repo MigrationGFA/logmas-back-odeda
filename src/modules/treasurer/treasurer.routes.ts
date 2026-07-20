@@ -1,8 +1,11 @@
 // src/modules/treasurer/treasurer.routes.ts
-import { Router } from 'express';
-import { requireAuth } from '../../middleware/auth.middleware';
-import { requireRole } from '../../middleware/role.middleware';
-import { validateBody, validateQuery } from '../../middleware/validate.middleware';
+import { Router } from "express";
+import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/role.middleware";
+import {
+  validateBody,
+  validateQuery,
+} from "../../middleware/validate.middleware";
 import {
   createLevyConfig,
   listLevyConfigs,
@@ -20,7 +23,7 @@ import {
   createPermitConfig,
   listPermitConfigs,
   getFieldOfficersList,
-} from './treasurer.controller';
+} from "./treasurer.controller";
 import {
   createLevyConfigSchema,
   createPermitConfigSchema,
@@ -28,7 +31,7 @@ import {
   listPermitConfigsSchema,
   updateLevyConfigSchema,
   updatePermitConfigSchema,
-} from './treasurer.validation';
+} from "./treasurer.validation";
 
 const router = Router();
 
@@ -68,11 +71,15 @@ const router = Router();
  *           format: date
  */
 
-router.use(requireAuth)
-router.get('/field-officers',requireRole("agent","lga_admin","treasurer","contractor"), getFieldOfficersList);
+router.use(requireAuth);
+router.get(
+  "/field-officers",
+  requireRole("agent", "lga_admin", "treasurer", "contractor"),
+  getFieldOfficersList,
+);
 
 // Enforce strict treasury access - only treasurer, finance, or super admin
-router.use( requireRole('treasurer', 'super_admin',"lga_admin"));
+router.use(requireRole("treasurer", "super_admin", "lga_admin"));
 
 // ============================================================
 // LEVY CONFIGURATION MANAGEMENT
@@ -184,9 +191,9 @@ router.use( requireRole('treasurer', 'super_admin',"lga_admin"));
  *         description: Forbidden - Insufficient role permissions
  */
 router.post(
-  '/levy-configs',
+  "/levy-configs",
   validateBody(createLevyConfigSchema),
-  createLevyConfig
+  createLevyConfig,
 );
 
 /**
@@ -274,9 +281,9 @@ router.post(
  *                       type: integer
  */
 router.get(
-  '/levy-configs',
+  "/levy-configs",
   // validateQuery(listLevyConfigsSchema),
-  listLevyConfigs
+  listLevyConfigs,
 );
 
 /**
@@ -342,7 +349,7 @@ router.get(
  *       404:
  *         description: Levy configuration not found
  */
-router.get('/levy-configs/:id', getLevyConfigById);
+router.get("/levy-configs/:id", getLevyConfigById);
 
 /**
  * @openapi
@@ -390,9 +397,9 @@ router.get('/levy-configs/:id', getLevyConfigById);
  *         description: Levy configuration not found
  */
 router.patch(
-  '/levy-configs/:id',
+  "/levy-configs/:id",
   validateBody(updateLevyConfigSchema),
-  updateLevyConfig
+  updateLevyConfig,
 );
 
 /**
@@ -429,7 +436,7 @@ router.patch(
  *       404:
  *         description: Levy configuration not found
  */
-router.patch('/levy-configs/:id/toggle', toggleLevyConfig);
+router.patch("/levy-configs/:id/toggle", toggleLevyConfig);
 
 // ============================================================
 // REVENUE ANALYTICS
@@ -508,7 +515,7 @@ router.patch('/levy-configs/:id/toggle', toggleLevyConfig);
  *                     dailyTrend:
  *                       type: array
  */
-router.get('/revenue', getRevenueOverview);
+router.get("/revenue", getRevenueOverview);
 
 /**
  * @openapi
@@ -569,9 +576,7 @@ router.get('/revenue', getRevenueOverview);
  *                           transactions:
  *                             type: integer
  */
-router.get('/revenue/by-officer', getRevenueByOfficer);
-
-
+router.get("/revenue/by-officer", getRevenueByOfficer);
 
 /**
  * @openapi
@@ -629,7 +634,7 @@ router.get('/revenue/by-officer', getRevenueByOfficer);
  *                           invoiceCount:
  *                             type: integer
  */
-router.get('/revenue/by-ward', getRevenueByWard);
+router.get("/revenue/by-ward", getRevenueByWard);
 
 // ============================================================
 // RECONCILIATION
@@ -699,7 +704,7 @@ router.get('/revenue/by-ward', getRevenueByWard);
  *                     meta:
  *                       type: object
  */
-router.get('/reconciliation', getReconciliation);
+router.get("/reconciliation", getReconciliation);
 
 // ============================================================
 // INVOICE MANAGEMENT (Treasurer Read-Only)
@@ -796,7 +801,7 @@ router.get('/reconciliation', getReconciliation);
  *                 meta:
  *                   type: object
  */
-router.get('/invoices', getAllInvoices);
+router.get("/invoices", getAllInvoices);
 
 /**
  * @openapi
@@ -852,7 +857,7 @@ router.get('/invoices', getAllInvoices);
  *       404:
  *         description: Invoice not found
  */
-router.get('/invoices/:id', getInvoiceById);
+router.get("/invoices/:id", getInvoiceById);
 
 /**
  * @openapi
@@ -890,91 +895,14 @@ router.get('/invoices/:id', getInvoiceById);
  *       404:
  *         description: Invoice not found
  */
-router.patch('/invoices/:id/mark-overdue', markInvoiceOverdue);
-
+router.patch("/invoices/:id/mark-overdue", markInvoiceOverdue);
 
 // ===================== permit config
 
-/**
- * @openapi
- * /treasurer/permit-configs:
- * get:
- * tags: [Treasurer Operations]
- * summary: List all permit configurations
- * description: Retrieve permit configs with optional filters for category and active status
- * security:
- * - BearerAuth: []
- * parameters:
- * - in: query
- * name: category
- * schema:
- * $ref: '#/components/schemas/RevenueCategory'
- * description: Filter by revenue category umbrella
- * - in: query
- * name: isActive
- * schema:
- * type: boolean
- * description: Filter by active status
- * - in: query
- * name: page
- * schema:
- * type: integer
- * default: 1
- * description: Page number
- * - in: query
- * name: limit
- * schema:
- * type: integer
- * default: 20
- * description: Items per page
- * responses:
- * 200:
- * description: List of permit configurations
- * content:
- * application/json:
- * schema:
- * type: object
- * properties:
- * success:
- * type: boolean
- * data:
- * type: array
- * items:
- * type: object
- * properties:
- * id:
- * type: string
- * name:
- * type: string
- * code:
- * type: string
- * category:
- * type: string
- * baseAmount:
- * type: number
- * isActive:
- * type: boolean
- * _count:
- * type: object
- * properties:
- * permits:
- * type: integer
- * meta:
- * type: object
- * properties:
- * total:
- * type: integer
- * page:
- * type: integer
- * limit:
- * type: integer
- * totalPages:
- * type: integer
- */
 router.get(
-  '/permit-configs',
+  "/permit-configs",
   // validateQuery(listPermitConfigsSchema),
-  listPermitConfigs
+  listPermitConfigs,
 );
 
 /**
@@ -1008,51 +936,15 @@ router.get(
  * description: Permit configuration created successfully
  */
 router.post(
-  '/permit-configs',
+  "/permit-configs",
   // validateBody(createPermitConfigSchema),
-  createPermitConfig
+  createPermitConfig,
 );
 
-/**
- * @openapi
- * /treasurer/permit-configs/{id}:
- * patch:
- * tags: [Treasurer Operations]
- * summary: Update a permit configuration or toggle status
- * description: Modify permit baseline metrics or deactivate/activate execution rules
- * security:
- * - BearerAuth: []
- * parameters:
- * - in: path
- * name: id
- * required: true
- * schema:
- * type: string
- * format: uuid
- * requestBody:
- * required: true
- * content:
- * application/json:
- * schema:
- * type: object
- * properties:
- * name:
- * type: string
- * baseAmount:
- * type: number
- * minimum: 0
- * isActive:
- * type: boolean
- * responses:
- * 200:
- * description: Permit configuration updated successfully
- * 404:
- * description: Permit configuration variant not found
- */
 router.patch(
-  '/permit-configs/:id',
+  "/permit-configs/:id",
   // validateBody(updatePermitConfigSchema),
-  updatePermitConfig
+  updatePermitConfig,
 );
 
 export default router;

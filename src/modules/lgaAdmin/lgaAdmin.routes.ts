@@ -13,6 +13,8 @@ import {
   getContractorsOverview,
   createContractor,
   addAgentToContractor,
+  getAllPermits,
+  revokePermit,
 } from './lgaAdmin.controller';
 import {
   createWardSchema, updateWardSchema, assignCouncillorSchema,
@@ -219,5 +221,9 @@ router.get('/contractors/overview', ...guard, getContractorsOverview);
  *       - BearerAuth: []
  */
 router.patch('/accounts/:id/reset-password', ...guard, resetAccountPassword);
+
+router.get('/permits', ...guard, getAllPermits);
+
+router.patch('/permits/:id/revoke', ...guard, revokePermit);
 
 export default router;

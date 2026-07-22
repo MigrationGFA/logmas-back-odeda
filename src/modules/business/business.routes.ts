@@ -643,7 +643,7 @@ router.get('/permits', requireAuth, requireRole('business_owner'), getMyPermits)
  *       404:
  *         description: Permit not found
  */
-router.get('/permits/:id', requireAuth, requireRole('business_owner',"field_officer"), getMyPermitById);
+router.get('/permits/:id', requireAuth, getMyPermitById);
 
 /**
  * @openapi

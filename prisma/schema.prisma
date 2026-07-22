@@ -423,6 +423,8 @@ model Permit {
   qrToken          String       @unique
   status           PermitStatus @default(draft)
 
+  revokeReason  String?
+
   // RELATIONAL CONFIGURATION REPLACEMENT:
   // Instead of a simple string or just a raw enum, tie it to the config entity
   configId String?

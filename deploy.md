@@ -34,7 +34,7 @@ pkill -u getfjupm node
 
 npx prisma db push
 
-npx prisma migrate dev --name added_some_more_annoying_shit
+npx prisma migrate dev --name added_one_more_annoying_shit
 
 
 # seed plan for revenue category if need be

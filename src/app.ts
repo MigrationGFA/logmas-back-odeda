@@ -93,10 +93,10 @@ app.use('/public', express.static('public'));
 app.use("/api/v1/payments", paymentRoutes); // must come before express.json() below
 app.use(express.json());
 
-app.use('/api/v1/auth', authLimiter, authRoutes);
 
 // API Engine Base Routing Architecture
-app.use('/api/v1/auth', authRoutes);
+// app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/wards', wardRoutes);
 app.use('/api/v1/lga', lgaRoutes);

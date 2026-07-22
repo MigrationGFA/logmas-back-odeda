@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { prisma } from "../../utils/prisma";
 import { sendSuccess, sendError } from "../../utils/response";
-import { Role } from "@prisma/client";
+import { PermitStatus, Role } from "@prisma/client";
 import { getIp, queryString } from "../complaints/complaints.controller";
 import { notify } from "../notification/notification.service";
 
@@ -669,7 +669,13 @@ export const toggleStaffStatus = async (
     const { reason } = req.body;
 
     if (id === requesterId) {
-      return sendError(res, 'You cannot suspend your own account', 'BAD_REQUEST', null, 400);
+      return sendError(
+        res,
+        "You cannot suspend your own account",
+        "BAD_REQUEST",
+        null,
+        400,
+      );
     }
 
     const target = await prisma.user.findUnique({
@@ -687,14 +693,20 @@ export const toggleStaffStatus = async (
     });
 
     if (!target || target.deletedAt) {
-      return sendError(res, 'Account not found', 'NOT_FOUND', null, 404);
+      return sendError(res, "Account not found", "NOT_FOUND", null, 404);
     }
 
     if (
-      requesterRole === 'lga_admin' &&
-      ['super_admin', 'lga_admin'].includes(target.role)
+      requesterRole === "lga_admin" &&
+      ["super_admin", "lga_admin"].includes(target.role)
     ) {
-      return sendError(res, 'You cannot suspend this account', 'FORBIDDEN', null, 403);
+      return sendError(
+        res,
+        "You cannot suspend this account",
+        "FORBIDDEN",
+        null,
+        403,
+      );
     }
 
     const nowActive = !target.isActive; // toggling
@@ -729,12 +741,12 @@ export const toggleStaffStatus = async (
     // Audit log
     await prisma.auditLog.create({
       data: {
-        action: 'user_updated',
-        entity: 'User',
+        action: "user_updated",
+        entity: "User",
         entityId: String(id),
         userId: requesterId,
         details: {
-          action: nowActive ? 'account_reactivated' : 'account_suspended',
+          action: nowActive ? "account_reactivated" : "account_suspended",
           reason: reason ?? null,
         },
         ipAddress: getIp(req),
@@ -747,46 +759,46 @@ export const toggleStaffStatus = async (
     if (!nowActive) {
       // Suspension
       try {
-      await notify({
-        userId: target.id,
-        to: { email: target.email, phone: target.phone ?? "" },
-        templateKey: "account.accountSuspended", // from your templates
-        vars: {
-        applicant_name: fullName,
-        suspension_reason: reason ?? "No specific reason provided.",
-        },
-        channels: ["email", "sms"],
-      });
+        await notify({
+          userId: target.id,
+          to: { email: target.email, phone: target.phone ?? "" },
+          templateKey: "account.accountSuspended", // from your templates
+          vars: {
+            applicant_name: fullName,
+            suspension_reason: reason ?? "No specific reason provided.",
+          },
+          channels: ["email", "sms"],
+        });
       } catch (notifyErr) {
-      console.error(
-        "[toggleStaffStatus] notify() failed for suspension, continuing anyway:",
-        notifyErr,
-      );
+        console.error(
+          "[toggleStaffStatus] notify() failed for suspension, continuing anyway:",
+          notifyErr,
+        );
       }
     } else {
       // Reactivation
       try {
-      await notify({
-        userId: target.id,
-        to: { email: target.email, phone: target.phone ?? "" },
-        templateKey: "account.accountReactivated",
-        vars: {
-        applicant_name: fullName,
-        },
-        channels: ["email", "sms"],
-      });
+        await notify({
+          userId: target.id,
+          to: { email: target.email, phone: target.phone ?? "" },
+          templateKey: "account.accountReactivated",
+          vars: {
+            applicant_name: fullName,
+          },
+          channels: ["email", "sms"],
+        });
       } catch (notifyErr) {
-      console.error(
-        "[toggleStaffStatus] notify() failed for reactivation, continuing anyway:",
-        notifyErr,
-      );
+        console.error(
+          "[toggleStaffStatus] notify() failed for reactivation, continuing anyway:",
+          notifyErr,
+        );
       }
     }
 
     return sendSuccess(
       res,
       updated,
-      `Account ${nowActive ? 'reactivated' : 'suspended'} successfully`,
+      `Account ${nowActive ? "reactivated" : "suspended"} successfully`,
     );
   } catch (err) {
     next(err);
@@ -1056,21 +1068,27 @@ export const resetAccountPassword = async (
     });
 
     if (!target || target.deletedAt) {
-      return sendError(res, 'Account not found', 'NOT_FOUND', null, 404);
+      return sendError(res, "Account not found", "NOT_FOUND", null, 404);
     }
 
     if (
-      requesterRole === 'lga_admin' &&
-      ['super_admin', 'lga_admin'].includes(target.role)
+      requesterRole === "lga_admin" &&
+      ["super_admin", "lga_admin"].includes(target.role)
     ) {
-      return sendError(res, 'You cannot reset this account password', 'FORBIDDEN', null, 403);
+      return sendError(
+        res,
+        "You cannot reset this account password",
+        "FORBIDDEN",
+        null,
+        403,
+      );
     }
 
     if (id === requesterId) {
       return sendError(
         res,
-        'Use your profile settings to reset your own password',
-        'BAD_REQUEST',
+        "Use your profile settings to reset your own password",
+        "BAD_REQUEST",
         null,
         400,
       );
@@ -1084,18 +1102,18 @@ export const resetAccountPassword = async (
       data: {
         password: hashedPassword,
         passwordResetRequired: true,
-        tokenVersion: { increment: 1 },   // invalidate existing sessions
+        tokenVersion: { increment: 1 }, // invalidate existing sessions
       },
     });
 
     await prisma.auditLog.create({
       data: {
-        action: 'user_updated',
-        entity: 'User',
+        action: "user_updated",
+        entity: "User",
         entityId: String(id),
         userId: requesterId,
         details: {
-          action: 'password_reset',
+          action: "password_reset",
           resetBy: requesterId,
           targetEmail: target.email,
         },
@@ -1108,13 +1126,13 @@ export const resetAccountPassword = async (
     try {
       await notify({
         userId: target.id,
-        to: { email: target.email, phone: target.phone ?? '' },
-        templateKey: 'account.passwordResetByAdmin',
+        to: { email: target.email, phone: target.phone ?? "" },
+        templateKey: "account.passwordResetByAdmin",
         vars: {
           applicant_name: fullName,
           temp_password: tempPassword,
         },
-        channels: ['email', 'sms'],
+        channels: ["email", "sms"],
       });
     } catch (notifyErr) {
       console.error(
@@ -1588,6 +1606,190 @@ export const addAgentToContractor = async (
       `Field agent added to contractor`,
       201,
     );
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/v1/permits/admin/:id/revoke
+// LGA Admin / Super Admin only
+export const revokePermit = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const adminId = req.user!.id;
+    const { reason } = req.body; // optional reason
+
+    const permit = await prisma.permit.findUnique({
+      where: { id: String(id) },
+      include: {
+        business: { select: { businessName: true, wardId: true } },
+      },
+    });
+
+    if (!permit)
+      return sendError(res, "Permit not found", "NOT_FOUND", null, 404);
+
+    // Can only revoke active permits
+    if (!["issued", "paid"].includes(permit.status)) {
+      return sendError(
+        res,
+        `Cannot revoke a permit with status "${permit.status}". Only issued or paid permits can be revoked.`,
+        "BAD_REQUEST",
+        null,
+        400,
+      );
+    }
+
+    const revoked = await prisma.permit.update({
+      where: { id: String(id) },
+      data: { status: "revoked", revokeReason: reason },
+      include: {
+        business: { select: { businessName: true } },
+        config: { select: { name: true } },
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: "permit_revoked",
+        entity: "Permit",
+        entityId: String(id),
+        userId: adminId,
+        details: {
+          permitNumber: permit.permitNumber,
+          businessName: permit.business.businessName,
+          reason: reason ?? "No reason provided",
+          previousStatus: permit.status,
+        },
+        ipAddress: getIp(req),
+      },
+    });
+
+    // TODO Phase 7: Notify business owner of revocation via SMS/email
+    // using permitTemplates.permitSuspended template
+
+    return sendSuccess(
+      res,
+      {
+        id: revoked.id,
+        permitNumber: permit.permitNumber,
+        status: revoked.status,
+        businessName: revoked.business.businessName,
+        permitType: revoked.config?.name ?? "—",
+        reason: reason ?? null,
+      },
+      `Permit ${permit.permitNumber} has been revoked`,
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/v1/permits/admin
+// LGA Admin / Super Admin — all permits with filters
+export const getAllPermits = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const search = queryString(req.query.search);
+    const wardId = queryString(req.query.wardId);
+    const status = queryString(req.query.status) as PermitStatus | undefined;
+    const page = parseInt(queryString(req.query.page) ?? "1");
+    const limit = parseInt(queryString(req.query.limit) ?? "20");
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (status) where.status = status;
+    if (wardId) where.business = { wardId };
+    if (search) {
+      where.OR = [
+        { permitNumber: { contains: search, mode: "insensitive" } },
+        {
+          business: { businessName: { contains: search, mode: "insensitive" } },
+        },
+        { business: { ownerName: { contains: search, mode: "insensitive" } } },
+      ];
+    }
+
+    const [permits, total] = await Promise.all([
+      prisma.permit.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          business: {
+            select: {
+              id: true,
+              businessName: true,
+              ownerName: true,
+              phone: true,
+              ward: { select: { id: true, name: true } },
+            },
+          },
+          config: { select: { name: true, baseAmount: true } },
+          issuedBy: { select: { id: true, firstName: true, lastName: true } },
+          invoice: {
+            select: {
+              id: true,
+              status: true,
+              amountPaid: true,
+              totalAmount: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.permit.count({ where }),
+    ]);
+
+    // Stat card aggregates
+    const [issuedCount, pendingCount, revenueAgg, activeOfficers] =
+      await Promise.all([
+        prisma.permit.count({ where: { status: "issued" } }),
+        prisma.permit.count({
+          where: { status: { in: ["pending_payment", "paid"] } },
+        }),
+        prisma.invoice.aggregate({
+          where: { permit: { isNot: null }, status: {in:["paid"] }},
+          _sum: { amountPaid: true },
+        }),
+        prisma.user.count({
+          where: { role: "field_officer", isActive: true, deletedAt: null },
+        }),
+      ]);
+
+    return sendSuccess(res, {
+      stats: {
+        issued: issuedCount,
+        pending: pendingCount,
+        totalRevenue: Number(revenueAgg._sum.amountPaid ?? 0),
+        activeOfficers,
+      },
+      permits: permits.map((p) => ({
+        id: p.id,
+        permitNumber: p.permitNumber,
+        status: p.status,
+        validFrom: p.validFrom,
+        validTo: p.validTo,
+        businessName: p.business.businessName,
+        ownerName: p.business.ownerName,
+        ward: p.business.ward?.name ?? "—",
+        wardId: p.business.ward?.id ?? null,
+        fee: Number(p.config?.baseAmount ?? p.invoice?.totalAmount ?? 0),
+        amountPaid: Number(p.invoice?.amountPaid ?? 0),
+        permitType: p.config?.name ?? "—",
+        issuedBy: p.issuedBy
+          ? `${p.issuedBy.firstName} ${p.issuedBy.lastName}`
+          : null,
+      })),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }

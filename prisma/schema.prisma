@@ -312,11 +312,31 @@ model Application {
 
   invoice     Invoice?
   certificate Certificate?
+  applicationDocuments ApplicationDocument[]
 
   @@index([serviceId])
   @@index([applicantId])
   @@index([status])
   @@map("applications")
+}
+
+// ============================================================
+// Application Documents
+// ============================================================
+
+model ApplicationDocument {
+  id            String   @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+
+  documentType  String
+  originalName  String
+  fileName      String
+  url           String
+  uploadedAt    DateTime @default(now())
+
+  @@index([applicationId])
+  @@map("application_documents")
 }
 
 // // ============================================================

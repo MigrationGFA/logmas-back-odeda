@@ -176,3 +176,9 @@ export const updatePermitConfigSchema = z.object({
     isActive: z.boolean().optional(),
   }),
 });
+
+// ── Treasurer Fees (Odeda simplified flow)
+export const upsertServiceFeeSchema = z.object({
+  amount: z.number().positive('Amount must be a positive monetary value'),
+});
+

@@ -54,15 +54,15 @@ export const register = async (
     // Check if account is suspended
     // If your user model supports account suspension, ensure 'isActive' exists in the schema and is selected here.
     // Otherwise, remove or adjust this check.
-    if (user.deletedAt !== null) {
-      return sendError(
-        res,
-        "Account suspended. Contact administrator.",
-        "FORBIDDEN",
-        null,
-        403,
-      );
-    }
+    // if (user.deletedAt !== null) {
+    //   return sendError(
+    //     res,
+    //     "Account suspended. Contact administrator.",
+    //     "FORBIDDEN",
+    //     null,
+    //     403,
+    //   );
+    // }
 
     // Log successful login
     await prisma.auditLog.create({
@@ -90,7 +90,7 @@ export const login = async (
   try {
     const { email, password } = req.body;
     const user = await prisma.user.findFirst({
-      where: { email, deletedAt: null },
+      where: { email },
     });
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
@@ -129,7 +129,7 @@ export const login = async (
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+      data: { },
     });
 
     return sendSuccess(res, {
@@ -142,7 +142,7 @@ export const login = async (
         lastName: user.lastName,
         role: user.role,
         isActive: user.isActive,
-        passwordResetRequired: user.passwordResetRequired, // NEW
+        // passwordResetRequired: user.passwordResetRequired, // NEW
       },
     });
   } catch (err) {
@@ -273,7 +273,7 @@ export const refreshToken = async (
     };
     const user = await prisma.user.findUnique({ where: { id: decoded.id } });
 
-    if (!user || !user.isActive || user.deletedAt) {
+    if (!user || !user.isActive ) {
       return sendError(res, "Invalid refresh token", "UNAUTHORIZED", null, 401);
     }
 

@@ -1,0 +1,48 @@
+{
+  "info": {
+    "name": "Odeda LOGMAS - Application Submission",
+    "_postman_id": "a1b2c3d4-application-collection",
+    "description": "Collection with an example request for submitting an application (multipart/form-data).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Application",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "serviceId", "value": "{{serviceId}}", "type": "text" },
+            { "key": "fullName", "value": "Jane Doe", "type": "text" },
+            { "key": "phone", "value": "08012345678", "type": "text" },
+            { "key": "email", "value": "jane.doe@example.com", "type": "text" },
+            { "key": "address", "value": "123 Main St", "type": "text" },
+            { "key": "formData", "value": "{\"businessName\":\"ACME Ltd\"}", "type": "text" },
+            { "key": "passport_photo", "type": "file", "src": ["{{passport_file}}"] },
+            { "key": "nin_slip", "type": "file", "src": ["{{nin_file}}"] }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/applications",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "applications"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

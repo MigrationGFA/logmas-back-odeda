@@ -25,6 +25,7 @@ import treasurerRoutes from './modules/treasurer/treasurer.routes';
 import permitRoutes from './modules/permits/permits.routes';
 import gernralRoutes from './modules/general/general.routes';
 import invoiceRoutes from './modules/invoice/invoice.routes';
+import applicationRoutes from './modules/application/application.routes';
 import receiptRoutes from './modules/receipts/receipt.routes';
 import dashboardRoutes from './modules/dashboard/dashboard.controller';
 
@@ -111,6 +112,7 @@ app.use('/api/v1/complaints', complaintRoutes);
 app.use('/api/v1/permits', permitRoutes);
 app.use('/api/v1/general', gernralRoutes);
 app.use('/api/v1/invoices', invoiceRoutes);
+app.use('/api/v1/applications', applicationRoutes);
 app.use('/api/v1/state-of-origin', stateOfOriginRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/business', businessRoutes);

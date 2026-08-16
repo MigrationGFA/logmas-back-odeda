@@ -1,4 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, ServiceCategory, FeeType, CertificateType } from '@prisma/client';
+
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import 'dotenv/config';
@@ -8,135 +9,173 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-// Helper to generate database slugs automatically from strings
-function slugify(text: string): string {
-  return text.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_+|_+$)/g, '');
-}
-
 async function main() {
-  console.log('🌱 Starting database seeding sequence...');
-
-  // 1. Clear existing records in reverse order of dependencies to satisfy foreign key constraints
-  await prisma.permitConfig.deleteMany();
-  await prisma.levyConfig.deleteMany();
-  await prisma.revenueCategory.deleteMany();
-  await prisma.ward.deleteMany();
-  console.log('🗑️ Purged legacy permit configs, levy configs, categories, and wards.');
-
-  // 2. Real administrative Wards of Ijebu North East LGA, Ogun State
-  const ijebuNorthEastWards = [
-    { name: 'Atan I', code: 'INE-01', description: 'Atan Headquarters Ward 1' },
-    { name: 'Atan II', code: 'INE-02', description: 'Atan Headquarters Ward 2' },
-    { name: 'Imesan / Idomila', code: 'INE-03', description: 'Imesan and Idomila residential axis' },
-    { name: 'Ilese', code: 'INE-04', description: 'Ilese township sector' },
-    { name: 'Ijeun / Ilugun', code: 'INE-05', description: 'Ijeun and Ilugun agrarian community belt' },
-    { name: 'Itamapako', code: 'INE-06', description: 'Itamapako territorial boundary' },
-    { name: 'Ogbogbo', code: 'INE-07', description: 'Ogbogbo community development area' },
-    { name: 'Iwopin / Oru', code: 'INE-08', description: 'Iwopin and outlying settlements' },
-    { name: 'Erunwon', code: 'INE-09', description: 'Erunwon ancient township perimeter' },
-    { name: 'Imodi / Imosan', code: 'INE-10', description: 'Imodi and Imosan unified ward structure' },
+  const services = [
+    // CERTIFICATES
+    {
+      code: 'certificate_of_origin',
+      certificateType: CertificateType.CERTIFICATE_OF_ORIGIN,
+      name: 'Certificate of Origin',
+      description: 'Official certificate confirming the origin of goods or products supplied from Odeda.',
+      category: ServiceCategory.CERTIFICATE,
+      revenueHead: '1001 - Statutory Certificate Fees',
+      requirements: ['Passport Photo', 'NIN', 'Proof of Residency'],
+      estimatedDays: 3,
+    },
+    {
+      code: 'club_registration',
+      certificateType: CertificateType.CLUB_REGISTRATION,
+      name: 'Certificate of Club Registration',
+      description: 'Registration certificate issued to social and professional clubs operating in Odeda.',
+      category: ServiceCategory.CERTIFICATE,
+      revenueHead: '1002 - Social & Club Fees',
+      requirements: ['Constitution', 'Members List', 'CAC Docs'],
+      estimatedDays: 5,
+    },
+    {
+      code: 'cda_registration',
+      certificateType: CertificateType.CDA_REGISTRATION,
+      name: 'Certificate of CDA Registration',
+      description: 'Certificate acknowledging the registration of a Community Development Association.',
+      category: ServiceCategory.CERTIFICATE,
+      revenueHead: '1003 - Community Dev. Fees',
+      requirements: ['CDA Constitution', 'Executive List'],
+      estimatedDays: 5,
+    },
+    {
+      code: 'farmers_registration',
+      certificateType: CertificateType.FARMERS_REGISTRATION,
+      name: 'Certificate of Farmers Registration',
+      description: 'Registration certificate for farmers and agricultural producers within Odeda.',
+      category: ServiceCategory.CERTIFICATE,
+      revenueHead: '1004 - Agricultural & Farmers Fees',
+      requirements: ['Farm Location Proof', 'Passport Photo'],
+      estimatedDays: 3,
+    },
+    {
+      code: 'sanitation_compliance',
+      certificateType: CertificateType.ENVIRONMENTAL_SANITATION_COMPLIANCE,
+      name: 'Certificate of Environmental Sanitation',
+      description: 'Certificate confirming environmental sanitation compliance after inspection.',
+      category: ServiceCategory.CERTIFICATE,
+      revenueHead: '1005 - Environmental Sanitation Fees',
+      requirements: ['Site Inspection', 'Sanitation Report'],
+      estimatedDays: 7,
+    },
+    // RATES AND LEVIES
+    {
+      code: 'tenement_rate',
+      certificateType: CertificateType.TENEMENT_RATE_CLEARANCE,
+      name: 'Tenement Rate',
+      description: 'Assessment and levy on property or tenement holdings located in Odeda.',
+      category: ServiceCategory.RATES_AND_LEVIES,
+      revenueHead: '2001 - Tenement & Property Rates',
+      requirements: ['Property Title', 'Survey Plan'],
+      estimatedDays: 14,
+    },
+    {
+      code: 'haulage_fees',
+      certificateType: CertificateType.HAULAGE_PERMIT,
+      name: 'Haulage Fees',
+      description: 'Fees charged for the movement and transit of goods or materials through Odeda.',
+      category: ServiceCategory.RATES_AND_LEVIES,
+      revenueHead: '2002 - Haulage & Transit Levies',
+      requirements: ['Vehicle Papers', 'Driver Licence'],
+      estimatedDays: 2,
+    },
+    // LICENCES AND PERMITS
+    {
+      code: 'liquor_licence',
+      certificateType: CertificateType.LIQUOR_LICENCE,
+      name: 'Liquor Licence Fees',
+      description: 'Licence fee for retail or commercial sale of liquor and associated outlets.',
+      category: ServiceCategory.LICENCES_AND_PERMITS,
+      revenueHead: '2003 - Liquor & Liquor Outlets',
+      requirements: ['Premises Photo', 'CAC', 'Health Certificate'],
+      estimatedDays: 10,
+    },
+    {
+      code: 'viewing_centre_licence',
+      certificateType: CertificateType.VIEWING_CENTRE_LICENCE,
+      name: 'Viewing Centre Licence Fee',
+      description: 'Licence fee for operating a cinema, viewing centre, or entertainment outlet.',
+      category: ServiceCategory.LICENCES_AND_PERMITS,
+      revenueHead: '2004 - Entertainment & Viewing Centres',
+      requirements: ['Premises Photo', 'Capacity Plan'],
+      estimatedDays: 7,
+    },
+    {
+      code: 'quarry_permit',
+      certificateType: CertificateType.QUARRY_PERMIT,
+      name: 'Quarry Fees and Permits',
+      description: 'Permit and operational fee for quarrying, mining, and mineral exploration activities.',
+      category: ServiceCategory.LICENCES_AND_PERMITS,
+      revenueHead: '2005 - Mining & Mineral Resources',
+      requirements: ['Site Survey', 'Equipment List', 'EIA Report'],
+      estimatedDays: 21,
+    },
+    {
+      code: 'kiosk_licence',
+      certificateType: CertificateType.KIOSK_LICENCE,
+      name: 'Kiosk Licence',
+      description: 'Licence for operating a temporary kiosk or small commercial structure.',
+      category: ServiceCategory.LICENCES_AND_PERMITS,
+      revenueHead: '2007 - Kiosk & Temporary Structures',
+      requirements: ['Kiosk Photo', 'Location Plan'],
+      estimatedDays: 3,
+    },
+    // URBAN DEVELOPMENT
+    {
+      code: 'street_naming',
+      certificateType: CertificateType.STREET_NAMING_CERTIFICATE,
+      name: 'Street Naming and Property Numbering',
+      description: 'Urban development service for assigning official street names and property numbering.',
+      category: ServiceCategory.URBAN_DEVELOPMENT,
+      revenueHead: '2006 - Urban Dev & Street Naming',
+      requirements: ['Survey Plan', 'Property Title'],
+      estimatedDays: 14,
+    },
   ];
 
-  console.log(`⏳ Injecting ${ijebuNorthEastWards.length} administrative wards...`);
-  await prisma.ward.createMany({
-    data: ijebuNorthEastWards,
-    skipDuplicates: true,
-  });
-  console.log('✅ Wards seeded.');
+  for (const s of services) {
+    const supportsRenewal = ['liquor_licence', 'viewing_centre_licence', 'kiosk_licence', 'quarry_permit'].includes(s.code);
 
-  // 3. Seed your dynamic Master Revenue Categories
-  const rawCategories = [
-    "Trade Permit Fees",
-    "Market Levy",
-    "Environmental Levy",
-    "Signage Permit",
-    "Shop Permit",
-    "Parking Levy",
-    "Haulage Levy",
-    "Lockup Store Levy",
-    "Business Levy",
-    "Mobile Trader Levy",
-    "Event Permit Fees",
-    "State of Origin Fee",
-    "Other"
-  ];
-
-  console.log(`⏳ Graduating and injecting ${rawCategories.length} master revenue categories...`);
-  
-  // We handle these inserts inline to safely access their mapping definitions later
-  const categoryMap: Record<string, string> = {};
-  
-  for (const name of rawCategories) {
-    const slug = slugify(name);
-    const createdCat = await prisma.revenueCategory.create({
-      data: {
-        name,
-        slug,
-        description: `Official ${name} billing tier grouping for local government revenue collection.`,
-        isActive: true
-      }
+    await prisma.service.upsert({
+      where: { code: s.code },
+      update: {
+        name: s.name,
+        category: s.category,
+        revenueHead: s.revenueHead,
+        requirements: s.requirements,
+        estimatedDays: s.estimatedDays,
+        certificateType: s.certificateType,
+        supportsRenewal,
+        isActive: true,
+        description: s.description,
+      },
+      create: {
+        code: s.code,
+        name: s.name,
+        description: s.description,
+        certificateType: s.certificateType,
+        category: s.category,
+        revenueHead: s.revenueHead,
+        requirements: s.requirements,
+        estimatedDays: s.estimatedDays,
+        supportsRenewal,
+        isActive: true,
+      },
     });
-    // Build a lookup key using the system slug to map permit configs accurately
-    categoryMap[slug] = createdCat.id;
   }
-  console.log('✅ Revenue categories seeded.');
 
-  // 4. Inject structural configurations using relation foreign keys
-  console.log('⏳ Injecting dynamic framework configurations using category maps...');
-
-  const permitConfigs = [
-    {
-      name: 'Standard Retail Trade Permit (Kiosk / Small Shop)',
-      code: 'TP_RETAIL_SM',
-      baseAmount: 15000.00,
-      categoryId: categoryMap[slugify('Trade Permit Fees')],
-      isActive: true,
-    },
-    {
-      name: 'Medium Commercial Trade Permit (Supermarket / Pharmacy)',
-      code: 'TP_COMM_MD',
-      baseAmount: 45000.00,
-      categoryId: categoryMap[slugify('Trade Permit Fees')],
-      isActive: true,
-    },
-    {
-      name: 'Large Scale Industrial Trade Permit (Wholesale / Manufacturing)',
-      code: 'TP_IND_LG',
-      baseAmount: 120000.00,
-      categoryId: categoryMap[slugify('Trade Permit Fees')],
-      isActive: true,
-    },
-    {
-      name: 'Social Event Permit (Plaza / Hall / Open Air Blockage)',
-      code: 'EP_SOCIAL_LG',
-      baseAmount: 35000.00,
-      categoryId: categoryMap[slugify('Event Permit Fees')],
-      isActive: true,
-    },
-    {
-      name: 'Corporate Event Permit (Exhibition / Concert Venue)',
-      code: 'EP_CORP_MD',
-      baseAmount: 75000.00,
-      categoryId: categoryMap[slugify('Event Permit Fees')],
-      isActive: true,
-    },
-  ];
-
-  const seededConfigs = await prisma.permitConfig.createMany({
-    data: permitConfigs,
-    skipDuplicates: true,
-  });
-
-  console.log(`📋 Permit configurations seeded: ${seededConfigs.count} item records.`);
-  console.log('🎉 Database seeding sequence completed successfully!');
+  console.log('✅ 12 Odeda services seeded');
 }
 
 main()
   .catch((e) => {
-    console.error('❌ Database seeding process terminated due to an error:', e);
+    console.error(e);
     process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
-    await pool.end();
   });

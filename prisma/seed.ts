@@ -19,7 +19,7 @@ async function main() {
       description: 'Official certificate confirming the origin of goods or products supplied from Odeda.',
       category: ServiceCategory.CERTIFICATE,
       revenueHead: '1001 - Statutory Certificate Fees',
-      requirements: ['Passport Photo', 'NIN', 'Proof of Residency'],
+      requirements: ['passport_photo', 'nin_slip', 'proof_of_residency'],
       estimatedDays: 3,
     },
     {
@@ -29,7 +29,7 @@ async function main() {
       description: 'Registration certificate issued to social and professional clubs operating in Odeda.',
       category: ServiceCategory.CERTIFICATE,
       revenueHead: '1002 - Social & Club Fees',
-      requirements: ['Constitution', 'Members List', 'CAC Docs'],
+      requirements: ['constitution', 'members_list', 'cac_docs'],
       estimatedDays: 5,
     },
     {
@@ -39,7 +39,7 @@ async function main() {
       description: 'Certificate acknowledging the registration of a Community Development Association.',
       category: ServiceCategory.CERTIFICATE,
       revenueHead: '1003 - Community Dev. Fees',
-      requirements: ['CDA Constitution', 'Executive List'],
+      requirements: ['cda_constitution', 'executive_list'],
       estimatedDays: 5,
     },
     {
@@ -49,7 +49,7 @@ async function main() {
       description: 'Registration certificate for farmers and agricultural producers within Odeda.',
       category: ServiceCategory.CERTIFICATE,
       revenueHead: '1004 - Agricultural & Farmers Fees',
-      requirements: ['Farm Location Proof', 'Passport Photo'],
+      requirements: ['farm_location_proof', 'passport_photo'],
       estimatedDays: 3,
     },
     {
@@ -59,7 +59,7 @@ async function main() {
       description: 'Certificate confirming environmental sanitation compliance after inspection.',
       category: ServiceCategory.CERTIFICATE,
       revenueHead: '1005 - Environmental Sanitation Fees',
-      requirements: ['Site Inspection', 'Sanitation Report'],
+      requirements: ['site_inspection', 'sanitation_report'],
       estimatedDays: 7,
     },
     // RATES AND LEVIES
@@ -70,7 +70,7 @@ async function main() {
       description: 'Assessment and levy on property or tenement holdings located in Odeda.',
       category: ServiceCategory.RATES_AND_LEVIES,
       revenueHead: '2001 - Tenement & Property Rates',
-      requirements: ['Property Title', 'Survey Plan'],
+      requirements: ['property_title', 'survey_plan'],
       estimatedDays: 14,
     },
     {
@@ -80,7 +80,7 @@ async function main() {
       description: 'Fees charged for the movement and transit of goods or materials through Odeda.',
       category: ServiceCategory.RATES_AND_LEVIES,
       revenueHead: '2002 - Haulage & Transit Levies',
-      requirements: ['Vehicle Papers', 'Driver Licence'],
+      requirements: ['vehicle_papers', 'driver_license'],
       estimatedDays: 2,
     },
     // LICENCES AND PERMITS
@@ -91,7 +91,7 @@ async function main() {
       description: 'Licence fee for retail or commercial sale of liquor and associated outlets.',
       category: ServiceCategory.LICENCES_AND_PERMITS,
       revenueHead: '2003 - Liquor & Liquor Outlets',
-      requirements: ['Premises Photo', 'CAC', 'Health Certificate'],
+      requirements: ['premises_photo', 'cac_docs', 'health_certificate'],
       estimatedDays: 10,
     },
     {
@@ -101,7 +101,7 @@ async function main() {
       description: 'Licence fee for operating a cinema, viewing centre, or entertainment outlet.',
       category: ServiceCategory.LICENCES_AND_PERMITS,
       revenueHead: '2004 - Entertainment & Viewing Centres',
-      requirements: ['Premises Photo', 'Capacity Plan'],
+      requirements: ['premises_photo', 'capacity_plan'],
       estimatedDays: 7,
     },
     {
@@ -111,7 +111,7 @@ async function main() {
       description: 'Permit and operational fee for quarrying, mining, and mineral exploration activities.',
       category: ServiceCategory.LICENCES_AND_PERMITS,
       revenueHead: '2005 - Mining & Mineral Resources',
-      requirements: ['Site Survey', 'Equipment List', 'EIA Report'],
+      requirements: ['site_survey', 'equipment_list', 'eia_report'],
       estimatedDays: 21,
     },
     {
@@ -121,7 +121,7 @@ async function main() {
       description: 'Licence for operating a temporary kiosk or small commercial structure.',
       category: ServiceCategory.LICENCES_AND_PERMITS,
       revenueHead: '2007 - Kiosk & Temporary Structures',
-      requirements: ['Kiosk Photo', 'Location Plan'],
+      requirements: ['kiosk_photo', 'location_plan'],
       estimatedDays: 3,
     },
     // URBAN DEVELOPMENT
@@ -132,8 +132,30 @@ async function main() {
       description: 'Urban development service for assigning official street names and property numbering.',
       category: ServiceCategory.URBAN_DEVELOPMENT,
       revenueHead: '2006 - Urban Dev & Street Naming',
-      requirements: ['Survey Plan', 'Property Title'],
+      requirements: ['survey_plan', 'property_title'],
       estimatedDays: 14,
+    },
+    // State of Origin service (mapped from legacy module)
+    {
+      code: 'state_of_origin',
+      certificateType: CertificateType.CERTIFICATE_OF_ORIGIN,
+      name: 'State of Origin Certificate',
+      description: 'Certificate of Origin / State of Origin issued by LGA for residents.',
+      category: ServiceCategory.CERTIFICATE,
+      revenueHead: '1010 - State of Origin Fees',
+      requirements: ['passport_photo', 'nin_slip', 'proof_of_residency'],
+      estimatedDays: 5,
+    },
+    // Business registration (field-officer / admin assisted)
+    {
+      code: 'business_registration',
+      certificateType: CertificateType.CDA_REGISTRATION,
+      name: 'Business Registration',
+      description: 'Register a new business with the Local Government',
+      category: ServiceCategory.LICENCES_AND_PERMITS,
+      revenueHead: '3001 - Business Registration',
+      requirements: ['business_name', 'owner_name', 'cac_docs', 'phone'],
+      estimatedDays: 7,
     },
   ];
 

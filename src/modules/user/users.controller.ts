@@ -17,15 +17,15 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
 
 export const getUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const records = await prisma.user.findMany({ where: { deletedAt: null } });
+    const records = await prisma.user.findMany({ where: { isActive: true } });
     return sendSuccess(res, records);
   } catch (err) { next(err); }
 };
 
 export const getUserById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const record = await prisma.user.findFirst({ where: { id: String(req.params.id), deletedAt: null } });
-    if (!record) return sendError(res, 'User system entity missing', 'NOT_FOUND', null, 404);
+    const record = await prisma.user.findUnique({ where: { id: String(req.params.id) } });
+    if (!record || !record.isActive) return sendError(res, 'User system entity missing', 'NOT_FOUND', null, 404);
     return sendSuccess(res, record);
   } catch (err) { next(err); }
 };
@@ -39,7 +39,7 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
 
 export const softDeleteUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await prisma.user.update({ where: { id: String(req.params.id) }, data: { deletedAt: new Date() } });
+    await prisma.user.update({ where: { id: String(req.params.id) }, data: { isActive: false } });
     return sendSuccess(res, { message: 'User runtime identity profile flag-deleted successfully' });
   } catch (err) { next(err); }
 };

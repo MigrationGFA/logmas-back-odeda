@@ -43,36 +43,118 @@ export async function confirmPayment({
 }: ConfirmPaymentParams): Promise<ConfirmPaymentResult> {
   const finalReference = reference || generateReference("PAY");
 
-  // Idempotency guard
-  const existing = await prisma.payment.findUnique({
-    where: { reference: finalReference },
+  // ---------------------------------------------------------
+  // 1. Idempotency check
+  // ---------------------------------------------------------
+  const existingPayment = await prisma.payment.findUnique({
+    where: {
+      reference: finalReference,
+    },
   });
-  if (existing && existing.status === "confirmed") {
+
+  if (existingPayment?.status === "confirmed") {
     const invoice = await prisma.invoice.findUnique({
-      where: { id: invoiceId },
+      where: {
+        id: invoiceId,
+      },
     });
-    const receipt = await prisma.receipt.findUnique({ where: { invoiceId } });
+
+    const receipt = await prisma.receipt.findUnique({
+      where: {
+        invoiceId,
+      },
+    });
+
+    if (!invoice) {
+      throw new Error(`Invoice ${invoiceId} not found`);
+    }
+
+    const confirmedPayments = await prisma.payment.aggregate({
+      where: {
+        invoiceId,
+        status: "confirmed",
+      },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    const amountPaid = Number(
+      confirmedPayments._sum.amount || 0,
+    );
+
+    const balanceDue = Math.max(
+      Number(invoice.amount) - amountPaid,
+      0,
+    );
+
     return {
       alreadyProcessed: true,
-      payment: existing,
+      payment: existingPayment,
       invoice,
       receipt,
-      isFullPayment: invoice?.status === "paid",
+      isFullPayment: balanceDue === 0,
     };
   }
 
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-  if (!invoice) throw new Error(`Invoice ${invoiceId} not found`);
+  // ---------------------------------------------------------
+  // 2. Get invoice
+  // ---------------------------------------------------------
+  const invoice = await prisma.invoice.findUnique({
+    where: {
+      id: invoiceId,
+    },
+  });
 
-  const balanceDue = Number(invoice.balanceDue);
-  const isFullPayment = amount >= balanceDue;
-  const newAmountPaid = Number(invoice.amountPaid) + amount;
-  const newBalanceDue = Math.max(balanceDue - amount, 0);
+  if (!invoice) {
+    throw new Error(`Invoice ${invoiceId} not found`);
+  }
 
+  // ---------------------------------------------------------
+  // 3. Calculate current payment position
+  //    Invoice.amount is the authoritative invoice amount.
+  //    Payment records determine how much has been paid.
+  // ---------------------------------------------------------
+  const confirmedPayments = await prisma.payment.aggregate({
+    where: {
+      invoiceId,
+      status: "confirmed",
+    },
+    _sum: {
+      amount: true,
+    },
+  });
+
+  const amountAlreadyPaid = Number(
+    confirmedPayments._sum.amount || 0,
+  );
+
+  const invoiceAmount = Number(invoice.amount);
+
+  const remainingBeforePayment = Math.max(
+    invoiceAmount - amountAlreadyPaid,
+    0,
+  );
+
+  const newAmountPaid =
+    amountAlreadyPaid + Number(amount);
+
+  const newBalanceDue = Math.max(
+    invoiceAmount - newAmountPaid,
+    0,
+  );
+
+  const isFullPayment = newBalanceDue === 0;
+
+  // ---------------------------------------------------------
+  // 4. Create/confirm payment + receipt atomically
+  // ---------------------------------------------------------
   const result = await prisma.$transaction(async (tx) => {
-    const payment = existing
+    const payment = existingPayment
       ? await tx.payment.update({
-          where: { id: existing.id },
+          where: {
+            id: existingPayment.id,
+          },
           data: {
             status: "confirmed",
             gatewayRef,
@@ -82,7 +164,11 @@ export async function confirmPayment({
         })
       : await tx.payment.create({
           data: {
-            invoice: { connect: { id: invoiceId } },
+            invoice: {
+              connect: {
+                id: invoiceId,
+              },
+            },
             amount,
             method,
             status: "confirmed",
@@ -91,81 +177,80 @@ export async function confirmPayment({
             narration,
             confirmedAt: new Date(),
             confirmedById,
-            paidBy: paidById ? { connect: { id: paidById } } : undefined,
+            paidBy: paidById
+              ? {
+                  connect: {
+                    id: paidById,
+                  },
+                }
+              : undefined,
           },
         });
 
-    // Inside the transaction, after creating/updating the confirmed payment
+    // Remove stale pending payment attempts for this invoice.
     await tx.payment.deleteMany({
       where: {
-        invoiceId: invoiceId,
+        invoiceId,
         status: "pending",
-        id: { not: payment.id }, // keep the one we just confirmed
+        id: {
+          not: payment.id,
+        },
       },
     });
 
-    const updatedInvoice = await tx.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        amountPaid: newAmountPaid,
-        balanceDue: newBalanceDue,
-        status: isFullPayment ? "paid" : "partially_paid",
-        paidAt: isFullPayment ? new Date() : null,
-      },
-    });
-
+    // -------------------------------------------------------
+    // 5. Create receipt only when invoice is fully paid
+    // -------------------------------------------------------
     let receipt = null;
+
     if (isFullPayment) {
       const existingReceipt = await tx.receipt.findUnique({
-        where: { invoiceId },
+        where: {
+          invoiceId,
+        },
       });
 
-      // Determine a safe fallback ID for who issued the receipt
-      const issuerId =
-        confirmedById ||
-        paidById ||
-        (invoice as any).createdById ||
-        (invoice as any).userId;
+      if (existingReceipt) {
+        receipt = existingReceipt;
+      } else {
+        const issuerId =
+          confirmedById ||
+          paidById ||
+          invoice.createdById;
 
-      receipt =
-        existingReceipt ??
-        (await tx.receipt.create({
+        receipt = await tx.receipt.create({
           data: {
             receiptNumber: generateReceiptNumber("RCP"),
             verificationCode: generateVerificationCode(),
             qrToken: generateQrToken(),
             amountPaid: newAmountPaid,
-            invoice: { connect: { id: invoiceId } },
-            // Connect unconditionally if an issuer identity exists
-            issuedBy: issuerId ? { connect: { id: issuerId } } : undefined,
+            invoice: {
+              connect: {
+                id: invoiceId,
+              },
+            },
+            issuedBy: issuerId
+              ? {
+                  connect: {
+                    id: issuerId,
+                  },
+                }
+              : undefined,
           },
-        }));
-
-      // Advance whatever this invoice is actually paying for.
-      const linkedPermit = await tx.permit.findUnique({ where: { invoiceId } });
-      if (linkedPermit && linkedPermit.status !== "issued") {
-        await tx.permit.update({
-          where: { id: linkedPermit.id },
-          data: { status: "issued" },
-        });
-      }
-
-      const linkedApplication = await tx.stateOfOriginApplication.findUnique({
-        where: { invoiceId },
-      });
-      if (
-        linkedApplication &&
-        linkedApplication.status !== "certificate_issued"
-      ) {
-        await tx.stateOfOriginApplication.update({
-          where: { id: linkedApplication.id },
-          data: { status: "paid" },
         });
       }
     }
 
-    return { payment, invoice: updatedInvoice, receipt };
+    return {
+      payment,
+      invoice,
+      receipt,
+    };
   });
 
-  return { alreadyProcessed: false, ...result, isFullPayment };
+  return {
+    alreadyProcessed: false,
+    ...result,
+    isFullPayment,
+  };
 }

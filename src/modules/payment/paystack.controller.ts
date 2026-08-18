@@ -22,7 +22,7 @@ import { sendEmail } from "../notification/email.service";
 
  const callbackUrl = process.env.NODE_ENV === "production"
       ? `${process.env.PAYSTACK_CALLBACK_URL}/dashboard/payment/result`
-      : "http://localhost:3000/dashboard/payment/result";
+      : "http://localhost:3002/dashboard/payment/result";
 
 export const initializePaystackPayment = async (
   req: Request,
@@ -40,7 +40,7 @@ export const initializePaystackPayment = async (
     if (!invoice)
       return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
 
-    if (["paid", "cancelled"].includes(invoice.status)) {
+    if (["paid", "cancelled"].includes(invoice.paymentStatus)) {
       return sendError(
         res,
         "Invoice is already paid or cancelled",
@@ -51,7 +51,7 @@ export const initializePaystackPayment = async (
     }
 
     const reference = generateReference("PAY");
-    const amountKobo = Math.round(Number(invoice.totalAmount) * 100);
+    const amountKobo = Math.round(Number(invoice.amount) * 100);
 
     const gatewayResult = await initializeTransaction({
       email: userEmail,
@@ -79,7 +79,7 @@ export const initializePaystackPayment = async (
     await prisma.payment.create({
       data: {
         invoice: { connect: { id: invoice.id } },
-        amount: Number(invoice.balanceDue),
+        amount: Number(invoice.amount),
         method: "online_gateway",
         status: "pending",
         reference,
@@ -387,83 +387,83 @@ export const sendPaymentLinkToBusiness = async (
  * State of Origin certificates, trade permits, and levies alike — since all
  * three are just Invoices with a different linked parent record.
  */
-export const getAllPaidServices = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const page = Math.max(Number(req.query.page ?? 1), 1);
-    const limit = Math.min(Number(req.query.limit ?? 20), 100); // cap to prevent abuse on a public route
+// export const getAllPaidServices = async (req: Request, res: Response, next: NextFunction) => {
+//   try {
+//     const page = Math.max(Number(req.query.page ?? 1), 1);
+//     const limit = Math.min(Number(req.query.limit ?? 20), 100); // cap to prevent abuse on a public route
 
-    const where = { status: "paid" as const };
+//     const where = { status: "paid" as const };
 
-    const [invoices, total] = await Promise.all([
-      prisma.invoice.findMany({
-        where,
-        orderBy: { paidAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          category: { select: { name: true, type: true } },
-          business: {
-            select: {
-              businessName: true,
-              ownerName: true,
-              ward: { select: { name: true } },
-            },
-          },
-          stateOfOriginApplication: {
-            select: {
-              fullName: true,
-              ward: { select: { name: true } },
-            },
-          },
-          permit: {
-            select: {
-              permitNumber: true,
-              config: { select: { name: true } },
-            },
-          },
-        },
-      }),
-      prisma.invoice.count({ where }),
-    ]);
+//     const [invoices, total] = await Promise.all([
+//       prisma.invoice.findMany({
+//         where,
+//         orderBy: { paidAt: "desc" },
+//         skip: (page - 1) * limit,
+//         take: limit,
+//         include: {
+//           category: { select: { name: true, type: true } },
+//           business: {
+//             select: {
+//               businessName: true,
+//               ownerName: true,
+//               ward: { select: { name: true } },
+//             },
+//           },
+//           stateOfOriginApplication: {
+//             select: {
+//               fullName: true,
+//               ward: { select: { name: true } },
+//             },
+//           },
+//           permit: {
+//             select: {
+//               permitNumber: true,
+//               config: { select: { name: true } },
+//             },
+//           },
+//         },
+//       }),
+//       prisma.invoice.count({ where }),
+//     ]);
 
-    const results = invoices.map((inv) => {
-      // Exactly one of these two relations can be set per invoice (schema-enforced
-      // via unique invoiceId on each side) — a plain levy invoice has neither.
-      const isStateOfOrigin = !!inv.stateOfOriginApplication;
-      const isPermit = !!inv.permit;
-      const type = isStateOfOrigin ? "state_of_origin" : isPermit ? "permit" : "levy";
+//     const results = invoices.map((inv) => {
+//       // Exactly one of these two relations can be set per invoice (schema-enforced
+//       // via unique invoiceId on each side) — a plain levy invoice has neither.
+//       const isStateOfOrigin = !!inv.stateOfOriginApplication;
+//       const isPermit = !!inv.permit;
+//       const type = isStateOfOrigin ? "state_of_origin" : isPermit ? "permit" : "levy";
 
-      const owner = isStateOfOrigin
-        ? inv.stateOfOriginApplication!.fullName
-        : (inv.business?.ownerName ?? inv.business?.businessName ?? "Unknown");
+//       const owner = isStateOfOrigin
+//         ? inv.stateOfOriginApplication!.fullName
+//         : (inv.business?.ownerName ?? inv.business?.businessName ?? "Unknown");
 
-      const lga = "Ijebu North East LGA"
+//       const lga = "Ijebu North East LGA"
 
-      return {
-        invoiceId: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        type,
-        serviceName: isPermit
-          ? (inv.permit!.config?.name ?? "Trade Permit")
-          : (inv.category?.name ?? inv.description),
-        owner,
-        amount: Number(inv.totalAmount),
-        lga,
-        status: inv.status,
-        paidAt: inv.paidAt,
-      };
-    });
+//       return {
+//         invoiceId: inv.id,
+//         invoiceNumber: inv.invoiceNumber,
+//         type,
+//         serviceName: isPermit
+//           ? (inv.permit!.config?.name ?? "Trade Permit")
+//           : (inv.category?.name ?? inv.description),
+//         owner,
+//         amount: Number(inv.totalAmount),
+//         lga,
+//         status: inv.status,
+//         paidAt: inv.paidAt,
+//       };
+//     });
 
-    return sendSuccess(res, {
-      results,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
-};
+//     return sendSuccess(res, {
+//       results,
+//       pagination: {
+//         page,
+//         limit,
+//         total,
+//         totalPages: Math.ceil(total / limit),
+//       },
+//     });
+//   } catch (err) {
+//     next(err);
+//   }
+// };

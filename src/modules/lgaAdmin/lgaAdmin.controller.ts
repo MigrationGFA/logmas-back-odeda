@@ -42,18 +42,7 @@ export const createWard = async (
       data: { name, code, description },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        action: "user_created",
-        entity: "Ward",
-        entityId: ward.id,
-        userId: adminId,
-        details: { name, code },
-        ipAddress: getIp(req),
-      },
-    });
-
-    return sendSuccess(res, ward, "Ward created successfully", 201);
+    return sendSuccess(res, { data: ward });
   } catch (err) {
     next(err);
   }
@@ -294,7 +283,7 @@ export const deleteWard = async (
 
     await prisma.auditLog.create({
       data: {
-        action: "user_deleted",
+        action: "user_suspended",
         entity: "Ward",
         entityId: id,
         userId: adminId,

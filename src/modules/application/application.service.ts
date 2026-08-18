@@ -12,32 +12,14 @@ type UploadedFileMeta = {
 };
 
 interface CreateAppParams {
-  applicantId: string;
+  applicantId?: string | null;
+  createdById?: string | null;
   serviceId: string;
-  fullName: string;
-  phone: string;
-  email?: string | null;
-  address: string;
-  ward?: string | null;
-  nin?: string | null;
-  cacNumber?: string | null;
-  formData: any;
+  formData: unknown;
 }
 
 export const createApplication = async (params: CreateAppParams & { files?: UploadedFileMeta[] }) => {
-  const {
-    applicantId,
-    serviceId,
-    fullName,
-    phone,
-    email,
-    address,
-    ward,
-    nin,
-    cacNumber,
-    formData,
-    files,
-  } = params;
+  const { applicantId, serviceId, formData, files, createdById } = params;
 
   // Transaction: create application and invoice atomically
   const result = await prisma.$transaction(async (tx) => {
@@ -68,24 +50,25 @@ export const createApplication = async (params: CreateAppParams & { files?: Uplo
     const feeAmount = feeConfig.amount;
 
     // 3. Create application
-    const application = await tx.application.create({
-      data: {
-        applicationNumber: generateReceiptNumber('APP'),
-        service: { connect: { id: serviceId } },
-        applicant: { connect: { id: applicantId } },
-        createdBy: { connect: { id: applicantId } },
-        fullName,
-        phone,
-        email: email ?? null,
-        address,
-        ward: ward ?? null,
-        nin: nin ?? null,
-        cacNumber: cacNumber ?? null,
-        feeAmount,
-        formData,
-        status: 'submitted',
-      },
-    });
+    const createData: any = {
+      applicationNumber: generateReceiptNumber('APP'),
+      service: { connect: { id: serviceId } },
+      feeAmount,
+      formData,
+      status: 'submitted',
+    };
+
+    if (applicantId) {
+      createData.applicant = { connect: { id: applicantId } };
+    }
+    if (createdById) {
+      createData.createdBy = { connect: { id: createdById } };
+    } else if (applicantId) {
+      // fallback: if no explicit createdBy provided, use applicant as creator
+      createData.createdBy = { connect: { id: applicantId } };
+    }
+
+    const application = await tx.application.create({ data: createData });
 
     // 4. Create invoice referencing the application
     const invoice = await tx.invoice.create({
@@ -121,7 +104,14 @@ export const createApplication = async (params: CreateAppParams & { files?: Uplo
 export const getApplicationByIdOrNumber = async (idOrNumber: string) => {
   const app = await prisma.application.findFirst({
     where: { OR: [{ id: idOrNumber }, { applicationNumber: idOrNumber }] },
-    include: { service: true, invoice: true, certificate: true },
+    include: {
+      service: true,
+      invoice: true,
+      certificate: true,
+      applicationDocuments: true,
+      applicant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+      createdBy: { select: { id: true, firstName: true, lastName: true, role: true } },
+    },
   });
   return app;
 };
@@ -132,11 +122,14 @@ export const listApplicationsForUser = async (user: any, page = 1, limit = 25) =
 
   if (user.role === 'citizen' || user.role === 'business_owner') {
     where.applicantId = user.id;
+  } else if (user.role === 'field_officer') {
+    // Field officers see applications they created
+    where.createdById = user.id;
   }
 
   const items = await prisma.application.findMany({
     where,
-    include: { service: true, invoice: true, certificate: true },
+    include: { service: true, invoice: true, certificate: true, applicationDocuments: true },
     orderBy: { createdAt: 'desc' },
     skip,
     take: limit,

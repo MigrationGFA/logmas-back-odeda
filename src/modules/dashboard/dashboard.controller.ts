@@ -1,7 +1,6 @@
 import {
   Role,
   InvoiceStatus,
-  PermitStatus,
   ApplicationStatus,
   ComplaintStatus,
   User,
@@ -17,780 +16,183 @@ export const fetchMetricsByRole = async (
 ) => {
   switch (role) {
     case Role.citizen: {
-      // 1. Fetch data associated with the user as an applicant or owner
-      const [applications, _receipt, complaints, invoices] = await Promise.all([
-        prisma.stateOfOriginApplication.findMany({
+      const [applications, complaints, invoices] = await Promise.all([
+        prisma.application.findMany({
           where: { applicantId: userId },
-          //   select: { status: true }
-        }),
-        prisma.receipt.count(),
-        prisma.complaint.count({
-          where: {
-            raisedById: userId,
-            status: { not: ComplaintStatus.closed },
+          include: {
+            service: { select: { code: true, name: true } },
+            applicationDocuments: { select: { id: true } },
+            invoice: { select: { amount: true, paymentStatus: true } },
           },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
         }),
-        prisma.invoice.findMany({
-          where: {
-            OR: [
-              { createdById: userId }, // Direct system/self invoices
-              { business: { ownerId: userId } }, // Business-related invoices
-            ],
-          },
-        }),
+        prisma.complaint.count({ where: { raisedById: userId, status: { not: ComplaintStatus.closed } } }),
+        prisma.invoice.findMany({ where: { application: { applicantId: userId } }, select: { id: true, amount: true, paymentStatus: true } }),
       ]);
 
-      // 2. Aggregate metrics for the UI
-      const pendingInvoices = invoices.filter(
-        (inv) => inv.status !== InvoiceStatus.paid,
-      );
-      const totalPendingAmount = pendingInvoices.reduce(
-        (sum, inv) => sum + Number(inv.totalAmount),
-        0,
-      );
-      const approvedApps = applications.filter(
-        (a) => a.status === ApplicationStatus.approved,
-      ).length;
+      const statusCounts = applications.reduce((acc: Record<string, number>, a) => {
+        acc[a.status] = (acc[a.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const pendingPaymentAmount = invoices.reduce((sum, inv) => {
+        return sum + (inv.paymentStatus === PaymentStatus.confirmed ? 0 : Number(inv.amount ?? 0));
+      }, 0);
 
       return {
         metrics: {
-          pendingPayments: totalPendingAmount,
-          approvedApplications: approvedApps,
+          pendingPayments: pendingPaymentAmount,
+          approvedApplications: statusCounts[ApplicationStatus.approved] ?? 0,
+          underReview: statusCounts[ApplicationStatus.under_review] ?? 0,
+          submitted: statusCounts[ApplicationStatus.submitted] ?? 0,
           openComplaints: complaints,
-          recentApplications: applications.slice(0, 5),
         },
+        recentApplications: applications.map((a) => ({
+          id: a.id,
+          applicationNumber: a.applicationNumber,
+          service: a.service?.name ?? a.service?.code,
+          status: a.status,
+          feeAmount: Number(a.feeAmount ?? 0),
+          createdAt: a.createdAt,
+        })),
       };
     }
+
     case Role.business_owner: {
-      const [businesses, complaints, invoiceAgg, recentInvoices] =
-        await Promise.all([
-          // Active permits count
-          prisma.permit.count({
-            where: {
-              business: { ownerId: userId },
-              status: "issued",
-            },
-          }),
+      const [applications, invoices, recentApplications] = await Promise.all([
+        prisma.application.count({ where: { OR: [{ applicantId: userId }, { createdById: userId }] } }),
+        prisma.invoice.findMany({ where: { application: { OR: [{ applicantId: userId }, { createdById: userId }] } }, select: { id: true, amount: true, paymentStatus: true } }),
+        prisma.application.findMany({ where: { OR: [{ applicantId: userId }, { createdById: userId }] }, include: { service: { select: { name: true } }, invoice: { select: { amount: true, paymentStatus: true } } }, orderBy: { createdAt: 'desc' }, take: 5 }),
+      ]);
 
-          // Open complaints
-          prisma.complaint.count({
-            where: { raisedById: userId, status: { not: "closed" } },
-          }),
-
-          // Revenue aggregates
-          prisma.invoice.aggregate({
-            where: {
-              OR: [{ createdById: userId }, { business: { ownerId: userId } }],
-            },
-            _sum: { amountPaid: true, balanceDue: true, totalAmount: true },
-            _count: { id: true },
-          }),
-
-          // Recent invoices for the table — shaped to match RecentInvoices component
-          prisma.invoice.findMany({
-            where: {
-              OR: [{ createdById: userId }, { business: { ownerId: userId } }],
-            },
-            include: {
-              business: { select: { businessName: true } },
-              createdBy: { select: { firstName: true, lastName: true } },
-            },
-            orderBy: { createdAt: "desc" },
-            take: 5,
-          }),
-        ]);
-
-      // Active notices = unpaid invoices count
-      const activeNotices = await prisma.invoice.count({
-        where: {
-          OR: [{ createdById: userId }, { business: { ownerId: userId } }],
-          status: { in: ["sent", "partially_paid", "overdue"] },
-        },
-      });
+      const totalPaid = invoices.reduce((s, inv) => s + (inv.paymentStatus === PaymentStatus.confirmed ? Number(inv.amount ?? 0) : 0), 0);
+      const outstanding = invoices.reduce((s, inv) => s + (inv.paymentStatus === PaymentStatus.confirmed ? 0 : Number(inv.amount ?? 0)), 0);
 
       return {
         metrics: {
-          activeNotices,
-          totalPaid: Number(invoiceAgg._sum.amountPaid ?? 0),
-          outstanding: Number(invoiceAgg._sum.balanceDue ?? 0),
-          activePermits: businesses,
-          // openComplaints: complaints,
+          totalApplications: applications,
+          totalPaid,
+          outstanding,
         },
-        recentInvoices: recentInvoices.map((inv) => ({
-          id: inv.id,
-          reference: inv.invoiceNumber, // UI reads i.reference
-          customerName:
-            inv.business?.businessName ??
-            `${inv.createdBy.firstName} ${inv.createdBy.lastName}`,
-          amount: Number(inv.totalAmount), // UI reads i.amount
-          status: inv.status, // UI reads i.status
+        recentApplications: recentApplications.map((a) => ({
+          id: a.id,
+          applicationNumber: a.applicationNumber,
+          service: a.service?.name,
+          status: a.status,
+          amount: Number(a.invoice?.amount ?? a.feeAmount ?? 0),
         })),
       };
     }
 
     case Role.treasurer: {
-      const currentYear = new Date().getFullYear();
-
-      // 1. Fetch concurrent aggregations across domains
-      const [
-        revenueData,
-        pendingData,
-        activeOfficersCount,
-        totalTransactionsCount,
-        categoriesWithRevenue,
-        monthlyRevenueRaw,
-      ] = await Promise.all([
-        // Total Revenue (Paid Invoices)
-        prisma.invoice.aggregate({
-          where: { status: InvoiceStatus.paid },
-          _sum: { amountPaid: true },
-        }),
-        // Pending Amount (Unpaid Invoices)
-        prisma.invoice.aggregate({
-          where: { status: { in: ["sent", "overdue"] } },
-          _sum: { totalAmount: true },
-        }),
-        // Count Active Revenue Officers
-        prisma.user.count({
-          where: {
-            role: Role.field_officer,
-            isActive: true,
-          },
-        }),
-        // Total Transactions count
-        prisma.invoice.count({
-          where: { status: InvoiceStatus.paid },
-        }),
-        // Grouping by description/category fallback to isolate dynamic configurations
-        prisma.revenueCategory.findMany({
-          select: {
-            id: true,
-            name: true, // 👈 This gets the text label your frontend needs (e.g. "Trade Levy")
-            invoices: {
-              where: { status: InvoiceStatus.paid },
-              select: { amountPaid: true },
-            },
-          },
-        }),
-        // Monthly distribution tracking for the trend chart line
-        prisma.invoice.findMany({
-          where: {
-            status: InvoiceStatus.paid,
-            createdAt: {
-              gte: new Date(`${currentYear}-01-01`),
-              lte: new Date(`${currentYear}-12-31`),
-            },
-          },
-          select: {
-            amountPaid: true,
-            createdAt: true,
-          },
-        }),
+      // Treasurer: aggregate confirmed payments and invoices
+      const [confirmedPayments, pendingInvoices, activeOfficers] = await Promise.all([
+        prisma.payment.findMany({ where: { status: PaymentStatus.confirmed }, include: { invoice: { include: { application: { include: { service: { select: { name: true } } } } } } } }),
+        prisma.invoice.findMany({ where: { paymentStatus: { not: PaymentStatus.confirmed } }, select: { id: true, amount: true } }),
+        prisma.user.count({ where: { role: Role.field_officer, isActive: true } }),
       ]);
 
-      // 2. Format 12-Month Revenue Trend Array (in Millions as expected by UI placeholder)
-    // 2. Format 12-Month Revenue Trend Array (Using accurate native currency formatting)
-      const monthsLookup = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      const chartData = monthsLookup.map((monthName, index) => {
-        const monthlySum = monthlyRevenueRaw
-          .filter((invoice) => new Date(invoice.createdAt).getMonth() === index)
-          .reduce((sum, current) => sum + Number(current.amountPaid || 0), 0);
+      const totalRevenue = confirmedPayments.reduce((s, p) => s + Number(p.amount ?? 0), 0);
+      const pendingAmount = pendingInvoices.reduce((s, inv) => s + Number(inv.amount ?? 0), 0);
 
-        // 💡 REMOVED THE / 1_000_000 SCALE. Now ₦150,000 displays as 150000 instead of 0.15
-        return {
-          month: monthName,
-          amount: monthlySum, 
-        };
+      // Monthly revenue by confirmed payments
+      const monthlyMap: Record<string, number> = {};
+      confirmedPayments.forEach((p) => {
+        const m = new Date(p.createdAt).getMonth();
+        const key = String(m + 1);
+        monthlyMap[key] = (monthlyMap[key] || 0) + Number(p.amount ?? 0);
       });
 
-      // 3. Transform dynamic billing matrix category text for the progress distribution block
-      const breakdownByCategory = categoriesWithRevenue
-        .map((category) => {
-          const totalPaid = category.invoices.reduce(
-            (sum, inv) => sum + Number(inv.amountPaid || 0),
-            0,
-          );
-          return {
-            category: category.name, // 👈 Replaces the ugly ID string with the readable name
-            amount: totalPaid,
-          };
-        })
-        // Sort descending so the highest earning categories show at the top of your progress blocks
-        .sort((a, b) => b.amount - a.amount)
-        // Take the top 5 earners matching your original design intent
-        .slice(0, 5);
-      console.log(chartData, "revenueByInvoiceGroup❤️");
-      // 4. Dispatch payloads formatted specifically for your frontend components
+      const revenueTrend = Array.from({ length: 12 }).map((_, i) => ({ month: i + 1, amount: monthlyMap[String(i + 1)] ?? 0 }));
+
+      // Service breakdown
+      const serviceMap: Record<string, number> = {};
+      confirmedPayments.forEach((p) => {
+        const svc = p.invoice?.application?.service?.name ?? 'Other';
+        serviceMap[svc] = (serviceMap[svc] || 0) + Number(p.amount ?? 0);
+      });
+
+      const serviceBreakdown = Object.entries(serviceMap).map(([service, amount]) => ({ service, amount }));
+
       return {
         metrics: {
-          totalRevenue: Number(revenueData._sum.amountPaid || 0),
-          pendingAmount: Number(pendingData._sum.totalAmount || 0),
-          activeOfficers: activeOfficersCount,
-          transactionCount: totalTransactionsCount,
+          totalRevenue,
+          pendingAmount,
+          activeOfficers,
+          transactionCount: confirmedPayments.length,
         },
-        revenueTrendChart: chartData,
-        categoryBreakdown: breakdownByCategory,
+        revenueTrend,
+        serviceBreakdown,
       };
     }
+
     case Role.lga_admin:
     case Role.super_admin: {
-      // Platform-Wide Infrastructure Scope
-      const [
-        totalLgas,
-        totalPlatformUsers,
-        totalSystemOfficers,
-        totalAuditEvents,
-      ] = await Promise.all([
-        // Count all Local Government Areas configured on the platform
-        Promise.resolve(1),
-
-        // Count all registered accounts across all roles (Citizens, Businesses, Admins, etc.)
-        prisma.user.count({ where: { deletedAt: null } }),
-
-        // Count all operational collection workers on the ground
-        prisma.user.count({
-          where: {
-            role: {
-              in: [
-                "field_officer",
-                "treasurer",
-                "ward_councillor",
-                "contractor",
-              ],
-            },
-            deletedAt: null,
-          },
-        }),
-
-        // Count total recorded logs inside your security system audit tables
-        prisma.auditLog?.count() ?? Promise.resolve(0),
+      const [totalApplications, totalUsers, activeFieldOfficers, auditEvents] = await Promise.all([
+        prisma.application.count(),
+        prisma.user.count(),
+        prisma.user.count({ where: { role: Role.field_officer, isActive: true } }),
+        prisma.auditLog.count(),
       ]);
 
       return {
         metrics: {
-          totalLgas,
-          platformUsers: totalPlatformUsers,
-          systemOfficers: totalSystemOfficers,
-          auditEvents: totalAuditEvents,
+          totalApplications,
+          totalUsers,
+          activeFieldOfficers,
+          auditEvents,
         },
-      };
-    }
-    case Role.contractor:
-    case Role.agent: {
-      const isContractor = role === Role.contractor;
-
-      // 1. Dynamic query filters based on active session role
-      const officerFilter = isContractor
-        ? { contractorId: userId, role: Role.agent }
-        : { agentId: userId, role: Role.field_officer };
-
-      const invoiceFilter = isContractor
-        ? { createdBy: { contractorId: userId } }
-        : {
-            createdBy: {
-              OR: [{ id: userId }, { agentId: userId }],
-            },
-          };
-
-      // 2. Fetch Agents/Officers managed under this user
-      const officers = await prisma.user.findMany({
-        where: officerFilter,
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          phone: true,
-          isActive: true,
-          createdAt: true,
-        },
-      });
-
-      // 3. Fetch all invoices generated in their respective scopes
-      const invoices = await prisma.invoice.findMany({
-        where: invoiceFilter,
-        include: {
-          business: { select: { businessName: true } },
-          permit: { select: { id: true } },
-        },
-        orderBy: { createdAt: "desc" },
-      });
-
-      // 4. Extract separate array collections matching UI expectations
-      const receipts = invoices
-        .filter(
-          (inv) =>
-            inv.status === InvoiceStatus.paid || Number(inv.amountPaid) > 0,
-        )
-        .map((inv) => ({
-          id: `rcpt-${inv.id}`,
-          invoiceId: inv.id,
-          amount: Number(inv.amountPaid),
-          createdAt: inv.paidAt ?? inv.updatedAt,
-        }));
-
-      // 5. Calculate dynamic revenue trends grouped by month
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-      const monthlyCollections = await prisma.invoice.groupBy({
-        by: ["createdAt"],
-        where: {
-          ...invoiceFilter,
-          status: InvoiceStatus.paid,
-          createdAt: { gte: sixMonthsAgo },
-        },
-        _sum: { amountPaid: true },
-      });
-
-      const revenueTrend = monthlyCollections.map((item) => ({
-        month: new Date(item.createdAt).toLocaleDateString("en-US", {
-          month: "short",
-        }),
-        amount: Number(item._sum.amountPaid || 0),
-      }));
-
-      // Shape unified response object payload mapping perfectly to your store hooks
-      return {
-        invoices: invoices.map((i) => ({
-          id: i.id,
-          invoiceNumber: i.invoiceNumber,
-          status:
-            i.status === InvoiceStatus.paid
-              ? "paid"
-              : i.status === InvoiceStatus.overdue
-                ? "overdue"
-                : "unpaid",
-          amount: Number(i.totalAmount),
-          balanceDue: Number(i.balanceDue),
-          customerName: i.business?.businessName ?? "Local Taxpayer",
-          createdAt: i.createdAt,
-        })),
-        receipts,
-        officers: officers.map((o) => ({
-          id: o.id,
-          name: `${o.firstName} ${o.lastName}`,
-          phone: o.phone,
-          status: o.isActive ? "active" : "inactive",
-        })),
-        revenueTrend,
       };
     }
 
     case Role.field_officer: {
-      // Enforce strict geographic fallback checks
-      if (!user.wardId) {
-        throw new Error(
-          "Field Officer must have an assigned wardId to load metrics.",
-        );
-      }
+      const [apps, recentApps] = await Promise.all([
+        prisma.application.findMany({ where: { createdById: userId }, select: { id: true, status: true } }),
+        prisma.application.findMany({ where: { createdById: userId }, include: { service: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 5 }),
+      ]);
 
-      // Execute efficient data sweeps across invoices, payments, and receipts in parallel
-      const [invoicesInWard, paymentsInWard, recentInvoicesRaw] =
-        await Promise.all([
-          // 1. Fetch total context mapping of invoices inside this ward
-          prisma.invoice.findMany({
-            where: {
-              business: {
-                wardId: user.wardId,
-              },
-              status: { not: "cancelled" },
-            },
-            select: {
-              id: true,
-              status: true,
-              totalAmount: true,
-            },
-          }),
+      const counts = apps.reduce((acc: Record<string, number>, a) => { acc[a.status] = (acc[a.status] || 0) + 1; return acc; }, {} as Record<string, number>);
 
-          // 2. Scan confirmed payments impacting this ward to calculate payment channel splits
-          prisma.payment.findMany({
-            where: {
-              status: "confirmed",
-              invoice: {
-                business: {
-                  wardId: user.wardId,
-                },
-              },
-            },
-            select: {
-              amount: true,
-              method: true,
-            },
-          }),
-
-          // 3. Pull recent invoice data for the RecentInvoices feed component array
-          prisma.invoice.findMany({
-            where: {
-              business: {
-                wardId: user.wardId,
-              },
-            },
-            take: 5,
-            orderBy: {
-              createdAt: "desc",
-            },
-            select: {
-              id: true,
-              invoiceNumber: true,
-              totalAmount: true,
-              status: true,
-              business: {
-                select: {
-                  businessName: true,
-                  ownerName: true,
-                },
-              },
-            },
-          }),
-        ]);
-
-      // 4. Reduce Row 1 Metrics: Status & Total Volumes
-      const totalInvoicesGenerated = invoicesInWard.length;
-      let pendingCount = 0;
-      let overdueCount = 0;
-
-      invoicesInWard.forEach((inv) => {
-        // UI expects "unpaid" to match unpaid/sent status maps
-        if (inv.status === "draft" || inv.status === "sent") {
-          pendingCount++;
-        } else if (inv.status === "overdue") {
-          overdueCount++;
-        }
-      });
-
-      // 5. Reduce Row 2 Metrics: Dynamic Payment Method Channels
-      let totalCollected = 0;
-      let cashTotal = 0;
-      let posTotal = 0;
-      let onlineTotal = 0;
-      let transferTotal = 0;
-
-      paymentsInWard.forEach((pay) => {
-        const amt = Number(pay.amount || 0);
-        totalCollected += amt;
-
-        switch (pay.method) {
-          case "cash":
-            cashTotal += amt;
-            break;
-          case "pos":
-            posTotal += amt;
-            break;
-          case "online_gateway":
-            onlineTotal += amt;
-            break;
-          case "bank_transfer":
-          case "virtual_account":
-            transferTotal += amt;
-            break;
-          default:
-            break;
-        }
-      });
-
-      // 6. Map Recent Invoices precisely to match the RecentInvoiceItem frontend contract
-      const formattedRecentInvoices = recentInvoicesRaw.map((inv) => ({
-        id: inv.id,
-        reference: inv.invoiceNumber,
-        customerName:
-          inv.business?.businessName ||
-          inv.business?.ownerName ||
-          "Walk-in Taxpayer",
-        amount: Number(inv.totalAmount || 0),
-        status:
-          inv.status === "draft" || inv.status === "sent"
-            ? "unpaid"
-            : inv.status, // Normalizing status strings
-      }));
-
-      // Return formatted response structure
       return {
         metrics: {
-          totalInvoicesGenerated,
-          totalCollected,
-          pendingCount,
-          overdueCount,
-          channelBreakdown: {
-            cash: cashTotal,
-            pos: posTotal,
-            online: onlineTotal,
-            transfer: transferTotal,
-          },
+          totalSubmitted: apps.length,
+          submitted: counts[ApplicationStatus.submitted] ?? 0,
+          underReview: counts[ApplicationStatus.under_review] ?? 0,
+          approved: counts[ApplicationStatus.approved] ?? 0,
+          declined: counts[ApplicationStatus.declined] ?? 0,
         },
-        recentInvoices: formattedRecentInvoices,
+        recentApplications: recentApps.map((a) => ({ id: a.id, applicationNumber: a.applicationNumber, service: a.service?.name, status: a.status })),
       };
     }
 
     case Role.auditor: {
-      // 1. Execute concurrent data sweeps for all auditor metrics
-      const [
-        totalCollectedData,
-        outstandingData,
-        receiptsCount,
-        auditEventsCount,
-        issuedPermitsCount,
-        pendingPermitsCount,
-        activeOfficersCount,
-        paymentMethodsData,
-        orphanedInvoices,
-        topReceipts,
-        recentAudits,
-      ] = await Promise.all([
-        // Total Collected (Sum of amountPaid on paid invoices)
-        prisma.invoice.aggregate({
-          where: { status: InvoiceStatus.paid },
-          _sum: { amountPaid: true },
-        }),
-
-        // Outstanding (Sum of totalAmount on unpaid/overdue invoices)
-        prisma.invoice.aggregate({
-          where: {
-            status: { notIn: [InvoiceStatus.paid, InvoiceStatus.cancelled] },
-          },
-          _sum: { totalAmount: true },
-        }),
-
-        // Total Receipts Count
+      const [confirmedPaymentsAgg, outstandingInvoices, receiptsCount, auditEventsCount, activeOfficers, paymentMethods] = await Promise.all([
+        prisma.payment.aggregate({ where: { status: PaymentStatus.confirmed }, _sum: { amount: true } }),
+        prisma.invoice.findMany({ where: { paymentStatus: { not: PaymentStatus.confirmed } }, select: { id: true, amount: true } }),
         prisma.receipt.count(),
-
-        // Total Audit Events Count
         prisma.auditLog.count(),
-
-        // Issued Permits Count
-        prisma.permit.count({ where: { status: PermitStatus.issued } }),
-
-        // Pending Permits Count
-        prisma.permit.count({
-          where: { status: PermitStatus.pending_payment },
-        }),
-
-        // Active Officers Count (field_officers + agents)
-        prisma.user.count({
-          where: {
-            role: { in: [Role.field_officer, Role.agent] },
-            isActive: true,
-            deletedAt: null,
-          },
-        }),
-
-        // Payment Methods Breakdown (Cash vs Digital)
-        // Note: Receipt model doesn't have paymentMethod, so we query the Payment table
-        prisma.payment.groupBy({
-          by: ["method"],
-          where: { status: PaymentStatus.confirmed },
-          _sum: { amount: true },
-        }),
-
-        // Anomalies: Invoices marked paid but have NO receipt (1:1 relation check)
-        prisma.invoice.findMany({
-          where: {
-            status: InvoiceStatus.paid,
-            receipt: null, // If receipt is null, it's an anomaly
-          },
-          take: 10, // Limit for the UI list
-          select: {
-            id: true,
-            invoiceNumber: true,
-            totalAmount: true,
-            business: { select: { businessName: true, ownerName: true } },
-          },
-        }),
-
-        // High-Value Transactions: Top 5 receipts by amount
-        prisma.receipt.findMany({
-          take: 5,
-          orderBy: { amountPaid: "desc" },
-          include: {
-            invoice: {
-              include: {
-                business: { select: { businessName: true, ownerName: true } },
-                category: { select: { name: true } },
-                payments: {
-                  take: 1,
-                  select: { method: true }, // Pull method from the payment record
-                },
-              },
-            },
-          },
-        }),
-
-        // Recent Audit Trail
-        prisma.auditLog.findMany({
-          take: 6,
-          orderBy: { createdAt: "desc" },
-          include: {
-            user: {
-              select: { firstName: true, lastName: true, role: true },
-            },
-          },
-        }),
+        prisma.user.count({ where: { role: Role.field_officer, isActive: true } }),
+        prisma.payment.groupBy({ by: ['method'], where: { status: PaymentStatus.confirmed }, _sum: { amount: true } }),
       ]);
 
-      // 2. Process Payment Methods Breakdown (Cash vs Digital)
-      let cashCollected = 0;
-      let digitalCollected = 0;
+      const totalCollected = Number(confirmedPaymentsAgg._sum.amount ?? 0);
+      const outstanding = outstandingInvoices.reduce((s, i) => s + Number(i.amount ?? 0), 0);
 
-      paymentMethodsData.forEach((p) => {
-        const amount = Number(p._sum.amount || 0);
-        if (p.method === PaymentMethod.cash) {
-          cashCollected += amount;
-        } else {
-          digitalCollected += amount;
-        }
-      });
-
-      const totalCollected = Number(totalCollectedData._sum.amountPaid || 0);
-      const outstanding = Number(outstandingData._sum.totalAmount || 0);
-      const cashShare =
-        totalCollected > 0
-          ? Math.round((cashCollected / totalCollected) * 100)
-          : 0;
-
-      // 3. Format Anomalies (Orphaned Paid Invoices) -> Maps to UI's `orphanPaid`
-      const formattedOrphans = orphanedInvoices.map((inv) => ({
-        id: inv.id,
-        reference: inv.invoiceNumber,
-        customerName:
-          inv.business?.businessName || inv.business?.ownerName || "Unknown",
-        amount: Number(inv.totalAmount),
-      }));
-
-      // 4. Format High-Value Transactions (Top Receipts) -> Maps to UI's `largeReceipts`
-      const formattedTopReceipts = topReceipts.map((r) => ({
-        id: r.id,
-        receiptNumber: r.receiptNumber,
-        customerName:
-          r.invoice?.business?.businessName ||
-          r.invoice?.business?.ownerName ||
-          "Unknown",
-        levyType: r.invoice?.category?.name || "General",
-        paymentMethod: r.invoice?.payments?.[0]?.method || "unknown",
-        amount: Number(r.amountPaid),
-      }));
-
-      // 5. Format Recent Audit Trail -> Maps to UI's `audits`
-      const formattedAudits = recentAudits.map((a) => ({
-        id: a.id,
-        action: a.action,
-        target: a.entity || "System",
-        actor: a.user ? `${a.user.firstName} ${a.user.lastName}` : "System",
-        actorRole: a.user?.role || "system",
-        createdAt: a.createdAt.toISOString(),
-      }));
-
-      // 6. Dispatch payloads formatted specifically for the Auditor UI
       return {
         metrics: {
           totalCollected,
           outstanding,
-          receiptsAudited: receiptsCount,
+          receiptsCount,
           auditEvents: auditEventsCount,
-          permitsIssued: issuedPermitsCount,
-          permitsPending: pendingPermitsCount,
-          cashShare,
-          activeOfficers: activeOfficersCount,
-          cashCollected,
-          digitalCollected,
+          activeOfficers,
         },
-        anomalies: formattedOrphans, // Map this to `orphanPaid` in your frontend hook
-        highValueTransactions: formattedTopReceipts, // Map this to `largeReceipts` in your frontend hook
-        recentAudits: formattedAudits, // Map this to `audits` in your frontend hook
-      };
-    }
-    case Role.ward_councillor: {
-      // Fetch the councillor's profile to get their assigned ward
-      const councillor = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { assignedWardId: true },
-      });
-
-      if (!councillor?.assignedWardId) {
-        throw new Error(
-          "No ward assigned to your account. Please contact the system administrator.",
-        );
-      }
-
-      const wardId = councillor.assignedWardId;
-
-      // Ward-Specific Legislative Scope
-      const [
-        totalConstituents,
-        pendingApprovals,
-        approvedSOO,
-        totalComplaints,
-        recentApplications,
-      ] = await Promise.all([
-        // 1. Count all registered citizens in the councillor's ward
-        prisma.stateOfOriginApplication.count({
-          where: {
-            assignedCouncillorId: userId,
-          },
-        }),
-
-        // 2. Count permits awaiting review in this ward
-        prisma.stateOfOriginApplication.count({
-          where: {
-            status: "forwarded_to_councillor",
-          },
-        }),
-
-        // 3. Count active, approved permits in this ward
-        prisma.stateOfOriginApplication.count({
-          where: {
-            status: { in: ["approved", "certificate_issued"] },
-            // business: { wardId: wardId },
-          },
-        }),
-
-        // 4. Count unresolved complaints inside this ward (safeguarded against missing model)
-        prisma.complaint.count({
-          where: {
-            assignedToId: userId,
-            status: { in: ["in_progress", "open"] },
-          },
-        }),
-
-        // 5. Fetch non-declined applications to populate the visual dashboard table
-        prisma.stateOfOriginApplication.findMany({
-          where: {
-            status: { not: { in: ["rejected"] } },
-            // business: { wardId: wardId },
-          },
-          orderBy: { createdAt: "desc" },
-          take: 5,
-          select: {
-            id: true,
-            status: true,
-            fullName: true,
-            ward: { select: { name: true } },
-          },
-        }),
-      ]);
-
-      // Map DB schema outputs to match what the React table expects
-      const formattedApplications = recentApplications.map((app) => ({
-        id: app.id.slice(0, 8).toUpperCase(),
-        applicant: app.fullName || "Unknown Applicant",
-        ward: app.ward?.name || "N/A",
-        status: app.status.toLowerCase(),
-      }));
-
-      return {
-        metrics: {
-          totalConstituents,
-          pendingApprovals,
-          approvedSOO,
-          totalComplaints,
-        },
-        applications: formattedApplications,
+        paymentMethods: paymentMethods.map((p) => ({ method: p.method, amount: Number(p._sum.amount ?? 0) })),
       };
     }
 
     default:
-      return {
-        message: "No specific metrics defined for this role.",
-        metrics: {},
-      };
+      return { message: 'No specific metrics defined for this role.', metrics: {} };
   }
 };
 

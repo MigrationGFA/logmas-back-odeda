@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getReceipts, getReceiptById } from './receipt.controller';
+// import { getReceipts, getReceiptById } from './receipt.controller';
 import { requireAuth } from '../../middleware/auth.middleware';
 
 const router = Router();
@@ -61,7 +61,7 @@ router.use(requireAuth);
  * nullable: true
  * example: null
  */
-router.get('/', getReceipts);
+// router.get('/', getReceipts);
 
 /**
  * @openapi
@@ -130,6 +130,6 @@ router.get('/', getReceipts);
  * 404:
  * description: Target resource was missing or access validation rejected.
  */
-router.get('/:id', getReceiptById);
+// router.get('/:id', getReceiptById);
 
 export default router;

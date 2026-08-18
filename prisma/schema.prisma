@@ -116,6 +116,11 @@ enum AuditAction {
   user_created
   user_updated
   user_suspended
+  user_reactivated
+  pricing_updated
+  complaint_logged
+  complaint_assigned
+  complaint_resolved
 }
 
 enum ViolationSeverity {
@@ -203,6 +208,7 @@ model User {
   auditLogs AuditLog[]
 
   @@map("users")
+  invoices Invoice[] @relation("InvoiceCreatedBy")
 }
 
 // ============================================================
@@ -282,23 +288,16 @@ model Application {
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
-  applicantId String
-  applicant   User?  @relation("ApplicantApplications", fields: [applicantId], references: [id])
+  applicantId String?
+  applicant   User?   @relation("ApplicantApplications", fields: [applicantId], references: [id])
 
   createdById String?
   createdBy   User?   @relation("ApplicationCreatedBy", fields: [createdById], references: [id])
-  fullName    String
-  phone       String
-  email       String?
-  address     String
-  ward        String?
-  nin         String?
-  cacNumber   String?
 
   // Snapshot of fee retrieved from Treasury configuration at application time
   feeAmount Decimal @db.Decimal(12, 2)
 
-  // Dynamic form payload JSON
+  // Dynamic form payload JSON — contains service-specific fields
   formData Json
 
   // LGA Administrator Review Decision
@@ -310,8 +309,8 @@ model Application {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  invoice     Invoice?
-  certificate Certificate?
+  invoice              Invoice?
+  certificate          Certificate?
   applicationDocuments ApplicationDocument[]
 
   @@index([serviceId])
@@ -325,38 +324,21 @@ model Application {
 // ============================================================
 
 model ApplicationDocument {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   applicationId String
   application   Application @relation(fields: [applicationId], references: [id])
 
-  documentType  String
-  originalName  String
-  fileName      String
-  url           String
-  uploadedAt    DateTime @default(now())
+  documentType String
+  originalName String
+  fileName     String
+  url          String
+  mimeType     String?
+  fileSize     Int?
+  uploadedAt   DateTime @default(now())
 
   @@index([applicationId])
   @@map("application_documents")
 }
-
-// // ============================================================
-// // FIELD INSPECTION REPORT
-// // ============================================================
-
-// model FieldInspection {
-//   id                  String             @id @default(uuid())
-//   applicationId       String             @unique
-//   application         Application        @relation(fields: [applicationId], references: [id])
-//   inspectorId         String
-//   inspector           User               @relation("InspectorConducted", fields: [inspectorId], references: [id])
-//   findings            String
-//   recommendedCategory String?
-//   recommendedFee      Decimal?           @db.Decimal(12, 2)
-//   sitePhotos          String[]
-//   completedAt         DateTime           @default(now())
-
-//   @@map("field_inspections")
-// }
 
 // ============================================================
 // 4. INVOICING & PAYMENT
@@ -379,6 +361,9 @@ model Invoice {
 
   paidAt         DateTime?
   transactionRef String?
+
+  createdById String?
+  createdBy   User?   @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
 
   assignedOfficerId String?
   assignedOfficer   User?   @relation(fields: [assignedOfficerId], references: [id])

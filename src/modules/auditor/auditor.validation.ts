@@ -9,7 +9,7 @@ export const auditLogFilterSchema = z.object({
     'payment_confirmed', 'payment_reversed', 'receipt_generated', 'receipt_verified',
     'permit_issued', 'permit_revoked', 'application_submitted', 'application_approved',
     'application_rejected', 'certificate_issued', 'user_created', 'user_updated',
-    'user_deleted', 'pricing_updated', 'complaint_raised', 'complaint_assigned',
+    'user_suspended', 'pricing_updated', 'complaint_raised', 'complaint_assigned',
     'complaint_resolved',
   ]).optional(),
   userId: z.string().uuid().optional(),

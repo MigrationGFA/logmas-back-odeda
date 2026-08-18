@@ -1,12 +1,12 @@
 // src/payments/payment.routes.ts
 import { Router } from "express";
 import express from "express";
-import { verifyPaystackPayment, paystackWebhook, getAllPaidServices } from "./paystack.controller";
+import { verifyPaystackPayment, paystackWebhook } from "./paystack.controller";
 // import { authenticate } from "../middleware/auth"; // TODO: match your actual auth middleware import
 
 const router = Router();
 
-router.get("/all", /* authenticate, */ getAllPaidServices);
+// router.get("/all", /* authenticate, */ getAllPaidServices);
 // GET /api/v1/payments/verify/:reference
 // Called by the frontend on refresh / after redirect back from Paystack.
 router.get("/verify/:reference", /* authenticate, */ verifyPaystackPayment);

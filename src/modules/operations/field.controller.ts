@@ -9,6 +9,7 @@ import {
   generateReference,
 } from "../../utils/generators";
 import { RevenueCategory, PaymentMethod, Role } from "@prisma/client";
+import * as ApplicationService from "../application/application.service";
 import { getIp, queryString } from "../complaints/complaints.controller";
 
 // ─────────────────────────────────────────────────────────────
@@ -43,51 +44,44 @@ export const registerBusiness = async (
     // const ward = await prisma.ward.findUnique({ where: { id: wardId } });
     // if (!ward) return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
 
-    // Check if a business with same name + phone already exists in this ward
-    const duplicate = await prisma.business.findFirst({
-      where: { businessName, phone, isActive: true },
-    });
-    if (duplicate) {
-      return sendError(
-        res,
-        "A business with this phone number already exists in this ward",
-        "CONFLICT",
-        null,
-        409,
-      );
+    // Check if a user already has this business recorded (avoid duplicates)
+    const duplicateUser = await prisma.user.findFirst({ where: { businessName, phone } });
+    if (duplicateUser) {
+      return sendError(res, 'A business with this phone number already exists', 'CONFLICT', null, 409);
     }
 
-    // Field officers register businesses under their own user ID as owner
-    // This is intentional — the "owner" here is the registered business owner (person),
-    // not a system user. The field officer is just the registrar.
-    const business = await prisma.business.create({
-      data: {
-        businessName,
-        ownerName,
-        address,
-        phone,
-        email,
-        cacNumber,
-        category,
-        description,
-        // wardId,
-        ownerId: officerId, // field officer is the registrar/proxy owner in the system
-      },
-      include: { ward: { select: { id: true, name: true, code: true } } },
+    // Instead of creating a legacy Business row, create an Application for business registration
+    const service = await prisma.service.findUnique({ where: { code: 'business_registration' } });
+    if (!service) return sendError(res, 'Business registration service not configured', 'BAD_REQUEST', null, 400);
+
+    const formData = { ownerName, address, cacNumber, category, description };
+
+    const { application } = await ApplicationService.createApplication({
+      applicantId: null,
+      serviceId: service.id,
+      fullName: ownerName,
+      phone,
+      email,
+      address: address || '',
+      ward: null,
+      nin: null,
+      cacNumber: cacNumber ?? null,
+      formData,
+      createdById: officerId,
     });
 
     await prisma.auditLog.create({
       data: {
-        action: "user_created",
-        entity: "Business",
-        entityId: business.id,
+        action: 'application_created',
+        entity: 'Application',
+        entityId: application.id,
         userId: officerId,
         details: { businessName, ownerName, registeredByOfficer: true },
         ipAddress: getIp(req),
       },
     });
 
-    return sendSuccess(res, business, "Business registered successfully", 201);
+    return sendSuccess(res, application, 'Business registration submitted as application', 201);
   } catch (err) {
     next(err);
   }
@@ -115,58 +109,20 @@ export const getAllWardBusinesses = async (
 
     const officerId = req.user.id;
 
-    // 2. Fetch the commercial footprint explicitly registered by this specific officer
-    const businesses = await prisma.business.findMany({
-      where: {
-        ownerId: officerId,
-        isActive: true,
-        deletedAt: null, // Safeguard against soft-deleted records
-      },
+    // 2. Fetch applications created by this officer for business registration
+    const service = await prisma.service.findUnique({ where: { code: 'business_registration' } });
+    if (!service) return sendError(res, 'Service not configured', 'BAD_REQUEST', null, 400);
+
+    const applications = await prisma.application.findMany({
+      where: { createdById: officerId, serviceId: service.id },
       include: {
-        ward: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-          },
-        },
-        invoices: {
-          where: {
-            status: { notIn: ["draft", "cancelled"] }, // Exclude internal or un-issued records
-          },
-          select: {
-            id: true,
-            invoiceNumber: true,
-            totalAmount: true,
-            amountPaid: true,
-            balanceDue: true,
-            status: true,
-            createdAt: true,
-          },
-          orderBy: { createdAt: "desc" },
-        },
-        permits: {
-          where: { status: "issued" },
-          orderBy: { createdAt: "desc" },
-          take: 1,
-          select: {
-            id: true,
-            validTo: true,
-            status: true,
-          },
-        },
+        invoice: { select: { id: true, amount: true, paymentStatus: true } },
+        applicationDocuments: true,
       },
-      orderBy: { businessName: "asc" },
+      orderBy: { createdAt: 'desc' },
     });
 
-    // 3. Return the payload cleanly.
-    return sendSuccess(res, {
-      data: businesses,
-      meta: {
-        total: businesses.length,
-        createdById: officerId,
-      },
-    });
+    return sendSuccess(res, { data: applications, meta: { total: applications.length, createdById: officerId } });
   } catch (err) {
     next(err);
   }

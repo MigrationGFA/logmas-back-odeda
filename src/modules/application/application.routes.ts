@@ -3,12 +3,18 @@ import multer from 'multer';
 import path from 'path';
 import crypto from 'crypto';
 import { requireAuth } from '../../middleware/auth.middleware';
+import { requireRole } from '../../middleware/authorize.middleware';
 import { UPLOAD_FOLDER_MAP, ensureDirectoryExists } from '../../utils/fileStorage';
 import { sendError } from '../../utils/response';
 import {
   createApplication,
   getApplicationById,
   listApplications,
+  adminListApplications,
+  adminGetApplication,
+  adminSetUnderReview,
+  adminApproveApplication,
+  adminDeclineApplication,
 } from './application.controller';
 
 const router = Router();
@@ -178,6 +184,14 @@ router.post(
   checkServiceDocumentTypes,
   createApplication
 );
+
+
+// Admin (LGA) endpoints
+router.get('/admin', requireAuth, requireRole('lga_admin', 'super_admin'), adminListApplications);
+router.get('/admin/:id', requireAuth, requireRole('lga_admin', 'super_admin'), adminGetApplication);
+router.patch('/admin/:id/under-review', requireAuth, requireRole('lga_admin', 'super_admin'), adminSetUnderReview);
+router.patch('/admin/:id/approve', requireAuth, requireRole('lga_admin', 'super_admin'), adminApproveApplication);
+router.patch('/admin/:id/decline', requireAuth, requireRole('lga_admin', 'super_admin'), adminDeclineApplication);
 
 router.get('/:id', requireAuth, getApplicationById);
 router.get('/', requireAuth, listApplications);

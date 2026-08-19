@@ -391,13 +391,13 @@ export const verifyReceipt = async (
       },
       include: {
         issuedBy: { select: { id: true, firstName: true, lastName: true } },
-        invoice: {
-          include: {
-            business: {
-              select: { businessName: true, ownerName: true, address: true },
-            },
-          },
-        },
+        // invoice: {
+        //   include: {
+        //     business: {
+        //       select: { businessName: true, ownerName: true, address: true },
+        //     },
+        //   },
+        // },
       },
     });
 
@@ -411,24 +411,24 @@ export const verifyReceipt = async (
       );
     }
 
-    await prisma.auditLog.create({
-      data: {
-        action: "receipt_verified",
-        entity: "Receipt",
-        entityId: receipt.id,
-        userId: auditorId,
-        details: { verifiedBy: "auditor", code },
-      },
-    });
+    // await prisma.auditLog.create({
+    //   data: {
+    //     action: "receipt_verified",
+    //     entity: "Receipt",
+    //     entityId: receipt.id,
+    //     userId: auditorId,
+    //     details: { verifiedBy: "auditor", code },
+    //   },
+    // });
 
     return sendSuccess(res, {
       valid: true,
       receiptNumber: receipt.receiptNumber,
       amountPaid: receipt.amountPaid,
       issuedAt: receipt.issuedAt,
-      issuedBy: `${receipt.issuedBy.firstName} ${receipt.issuedBy.lastName}`,
-      category: receipt.invoice.categoryId,
-      business: receipt.invoice.business ?? null,
+      // issuedBy: `${receipt.issuedBy.firstName} ${receipt.issuedBy.lastName}`,
+      // category: receipt.invoice.categoryId,
+      // business: receipt.invoice.business ?? null,
       issuingAuthority: "Ijebu North East Local Government",
     });
   } catch (err) {
@@ -596,18 +596,18 @@ export const getReconciliation = async (
       prisma.invoice.count({ where }),
       prisma.invoice.aggregate({
         where,
-        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+        _sum: { amount: true, amountPaid: true, balanceDue: true },
       }),
     ]);
 
     return sendSuccess(res, {
       period: { from: dateRange.gte, to: dateRange.lte },
       summary: {
-        totalInvoiced: summary._sum.totalAmount ?? 0,
-        totalCollected: summary._sum.amountPaid ?? 0,
-        totalOutstanding: summary._sum.balanceDue ?? 0,
+        totalInvoiced: summary._sum.amount ?? 0,
+        // totalCollected: summary._sum.amountPaid ?? 0,
+        // totalOutstanding: summary._sum.balanceDue ?? 0,
         variance:
-          Number(summary._sum.totalAmount ?? 0) -
+          Number(summary._sum.amount ?? 0) -
           Number(summary._sum.amountPaid ?? 0),
       },
       data: invoices,

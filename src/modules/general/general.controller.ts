@@ -14,7 +14,7 @@ export const getWardsList = async (req: Request, res: Response, next: NextFuncti
   try {
     const wards = await prisma.ward.findMany({
       where: {
-        deletedAt: null // Exclude soft-deleted records
+        // deletedAt: null // Exclude soft-deleted records
       },
       select: {
         id: true,

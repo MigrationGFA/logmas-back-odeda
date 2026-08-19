@@ -220,166 +220,166 @@ export const paystackWebhook = async (req: Request, res: Response) => {
 };
 
 // POST /api/v1/invoices/:id/send-payment-link
-export const sendPaymentLinkToBusiness = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const { id } = req.params; 
-    const role = req.user!.role;
+// export const sendPaymentLinkToBusiness = async (
+//   req: Request,
+//   res: Response,
+//   next: NextFunction,
+// ) => {
+//   try {
+//     const { id } = req.params; 
+//     const role = req.user!.role;
 
-    if (!["field_officer", "lga_admin", "super_admin"].includes(role)) {
-      return sendError(
-        res,
-        "Only field officers can send payment links",
-        "FORBIDDEN",
-        null,
-        403,
-      );
-    }
+//     if (!["field_officer", "lga_admin", "super_admin"].includes(role)) {
+//       return sendError(
+//         res,
+//         "Only field officers can send payment links",
+//         "FORBIDDEN",
+//         null,
+//         403,
+//       );
+//     }
 
-    const invoice = await prisma.invoice.findUnique({
-      where: { invoiceNumber: String(id) },
-      include: { business: true },
-    });
-    if (!invoice)
-      return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
-    if (!invoice.business) {
-      return sendError(
-        res,
-        "This invoice has no linked business",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
-    if (["paid", "cancelled"].includes(invoice.status)) {
-      return sendError(
-        res,
-        "Invoice is already paid or cancelled",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
+//     const invoice = await prisma.invoice.findUnique({
+//       where: { invoiceNumber: String(id) },
+//       include: { business: true },
+//     });
+//     if (!invoice)
+//       return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
+//     if (!invoice.business) {
+//       return sendError(
+//         res,
+//         "This invoice has no linked business",
+//         "BAD_REQUEST",
+//         null,
+//         400,
+//       );
+//     }
+//     if (["paid", "cancelled"].includes(invoice.status)) {
+//       return sendError(
+//         res,
+//         "Invoice is already paid or cancelled",
+//         "BAD_REQUEST",
+//         null,
+//         400,
+//       );
+//     }
 
-    const business = invoice.business;
+//     const business = invoice.business;
 
-    const isTestMode = process.env.NOTIFICATION_TEST_MODE !== "false";
-    const recipientEmail = isTestMode
-      ? process.env.TEST_RECIPIENT_EMAIL
-      : business.email;
-    const recipientPhone = isTestMode
-      ? process.env.TEST_RECIPIENT_PHONE
-      : business.phone;
+//     const isTestMode = process.env.NOTIFICATION_TEST_MODE !== "false";
+//     const recipientEmail = isTestMode
+//       ? process.env.TEST_RECIPIENT_EMAIL
+//       : business.email;
+//     const recipientPhone = isTestMode
+//       ? process.env.TEST_RECIPIENT_PHONE
+//       : business.phone;
 
-    if (!recipientEmail) {
-      return sendError(
-        res,
-        isTestMode
-          ? "TEST_RECIPIENT_EMAIL is not set in .env"
-          : "This business has no email on file. Add one before sending a payment link.",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
+//     if (!recipientEmail) {
+//       return sendError(
+//         res,
+//         isTestMode
+//           ? "TEST_RECIPIENT_EMAIL is not set in .env"
+//           : "This business has no email on file. Add one before sending a payment link.",
+//         "BAD_REQUEST",
+//         null,
+//         400,
+//       );
+//     }
 
-    const reference = generateReference("PAY");
-    const amountKobo = Math.round(Number(invoice.balanceDue) * 100);
+//     const reference = generateReference("PAY");
+//     const amountKobo = Math.round(Number(invoice.balanceDue) * 100);
 
-    // Ensure callbackUrl is defined (using fallback or env var)
-    const callbackUrl = process.env.PAYSTACK_CALLBACK_URL;
+//     // Ensure callbackUrl is defined (using fallback or env var)
+//     const callbackUrl = process.env.PAYSTACK_CALLBACK_URL;
 
-    const gatewayResult = await initializeTransaction({
-      email: recipientEmail,
-      amountKobo,
-      reference,
-      callbackUrl,
-      metadata: {
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        businessId: business.id,
-      },
-    });
+//     const gatewayResult = await initializeTransaction({
+//       email: recipientEmail,
+//       amountKobo,
+//       reference,
+//       callbackUrl,
+//       metadata: {
+//         invoiceId: invoice.id,
+//         invoiceNumber: invoice.invoiceNumber,
+//         businessId: business.id,
+//       },
+//     });
 
-    if (!gatewayResult.success) {
-      return sendError(
-        res,
-        gatewayResult.error ?? "Failed to initialize payment",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
+//     if (!gatewayResult.success) {
+//       return sendError(
+//         res,
+//         gatewayResult.error ?? "Failed to initialize payment",
+//         "BAD_REQUEST",
+//         null,
+//         400,
+//       );
+//     }
 
-    await prisma.payment.create({
-      data: {
-        invoice: { connect: { id: invoice.id } },
-        amount: Number(invoice.balanceDue),
-        method: "online_gateway",
-        status: "pending",
-        reference,
-      },
-    });
+//     await prisma.payment.create({
+//       data: {
+//         invoice: { connect: { id: invoice.id } },
+//         amount: Number(invoice.balanceDue),
+//         method: "online_gateway",
+//         status: "pending",
+//         reference,
+//       },
+//     });
 
-    const checkoutLink = gatewayResult.data!.authorization_url;
-    const vars = {
-      business_name: business.businessName,
-      payment_amount: `₦${Number(invoice.balanceDue).toLocaleString()}`,
-      checkout_link: checkoutLink,
-      permit_type: invoice.description ?? "Trade Permit",
-    };
+//     const checkoutLink = gatewayResult.data!.authorization_url;
+//     const vars = {
+//       business_name: business.businessName,
+//       payment_amount: `₦${Number(invoice.balanceDue).toLocaleString()}`,
+//       checkout_link: checkoutLink,
+//       permit_type: invoice.description ?? "Trade Permit",
+//     };
 
-    const template = NotificationTemplates.permit.invoiceGenerated;
+//     const template = NotificationTemplates.permit.invoiceGenerated;
 
-    // Initialize tracking flags
-    let smsSent = false;
-    let emailSent = false;
+//     // Initialize tracking flags
+//     let smsSent = false;
+//     let emailSent = false;
 
-    // 💡 Decoupled parallel execution with independent try/catch shields
-    await Promise.all([
-      (async () => {
-        try {
-          if (recipientPhone) {
-            const smsResult = await sendSms({
-              to: recipientPhone.replace("+", ""),
-              message: interpolate(template.sms, vars),
-            });
-            smsSent = !!smsResult?.success;
-          }
-        } catch (smsErr) {
-          console.error("[Notification Error] SMS transmission pipeline failed:", smsErr);
-          smsSent = false; // Graceful isolation: API keeps running
-        }
-      })(),
+//     // 💡 Decoupled parallel execution with independent try/catch shields
+//     await Promise.all([
+//       (async () => {
+//         try {
+//           if (recipientPhone) {
+//             const smsResult = await sendSms({
+//               to: recipientPhone.replace("+", ""),
+//               message: interpolate(template.sms, vars),
+//             });
+//             smsSent = !!smsResult?.success;
+//           }
+//         } catch (smsErr) {
+//           console.error("[Notification Error] SMS transmission pipeline failed:", smsErr);
+//           smsSent = false; // Graceful isolation: API keeps running
+//         }
+//       })(),
       
-      (async () => {
-        try {
-          const emailResult = await sendEmail({
-            to: recipientEmail,
-            subject: interpolate(template.emailSubject, vars),
-            html: interpolate(template.emailHtml, vars),
-          });
-          emailSent = !!emailResult?.success;
-        } catch (emailErr) {
-          console.error("[Notification Error] Email transmission pipeline failed:", emailErr);
-          emailSent = false; // Graceful isolation: API keeps running
-        }
-      })()
-    ]);
+//       (async () => {
+//         try {
+//           const emailResult = await sendEmail({
+//             to: recipientEmail,
+//             subject: interpolate(template.emailSubject, vars),
+//             html: interpolate(template.emailHtml, vars),
+//           });
+//           emailSent = !!emailResult?.success;
+//         } catch (emailErr) {
+//           console.error("[Notification Error] Email transmission pipeline failed:", emailErr);
+//           emailSent = false; // Graceful isolation: API keeps running
+//         }
+//       })()
+//     ]);
 
-    return sendSuccess(res, {
-      reference,
-      checkoutLink,
-      smsSent,
-      emailSent,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
+//     return sendSuccess(res, {
+//       reference,
+//       checkoutLink,
+//       smsSent,
+//       emailSent,
+//     });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
 
 /**
  * GET /api/v1/public/payments?page=1&limit=20

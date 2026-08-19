@@ -1,5 +1,4 @@
 // src/modules/treasurer/treasurer.validation.ts
-import { RevenueCategory } from "@prisma/client";
 import { z } from "zod";
 
 // ── Levy Config ───────────────────────────────────────────────

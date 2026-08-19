@@ -10,11 +10,7 @@ import {
   getAdminOverview,
   getAccountsOverview,
   resetAccountPassword,
-  getContractorsOverview,
-  createContractor,
-  addAgentToContractor,
-  getAllPermits,
-  revokePermit,
+
 } from './lgaAdmin.controller';
 import {
   createWardSchema, updateWardSchema, assignCouncillorSchema,
@@ -134,7 +130,7 @@ router.post('/staff', ...guard, validateBody(createStaffSchema), createStaff);
  *     security:
  *       - BearerAuth: []
  */
-router.post('/contractors', ...guard,  createContractor);
+// router.post('/contractors', ...guard,  createContractor);
 /**
  * @openapi
  * /lga/contractors/:contractorId/agents:
@@ -144,7 +140,7 @@ router.post('/contractors', ...guard,  createContractor);
  *     security:
  *       - BearerAuth: []
  */
-router.post('/contractors/:contractorId/agents', ...guard,  addAgentToContractor);
+// router.post('/contractors/:contractorId/agents', ...guard,  addAgentToContractor);
 
 /**
  * @openapi
@@ -209,7 +205,7 @@ router.get('/accounts/overview', ...guard, getAccountsOverview);
  *     security:
  *       - BearerAuth: []
  */
-router.get('/contractors/overview', ...guard, getContractorsOverview);
+// router.get('/contractors/overview', ...guard, getContractorsOverview);
 
 /**
  * @openapi
@@ -222,8 +218,8 @@ router.get('/contractors/overview', ...guard, getContractorsOverview);
  */
 router.patch('/accounts/:id/reset-password', ...guard, resetAccountPassword);
 
-router.get('/permits', ...guard, getAllPermits);
+// router.get('/permits', ...guard, getAllPermits);
 
-router.patch('/permits/:id/revoke', ...guard, revokePermit);
+// router.patch('/permits/:id/revoke', ...guard, revokePermit);
 
 export default router;

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
+import multer from 'multer';
 import { sendSuccess, sendError } from "../../utils/response";
 import * as ApplicationService from "./application.service";
 import { createApplicationSchema } from "./application.validation";

@@ -5,7 +5,9 @@ import {
   FeeType,
   CertificateType,
   FeeStatus,
+  Role,
 } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
@@ -265,6 +267,55 @@ async function main() {
     );
   }
 
+   const users = [
+    {
+      email: "citizen@odeda.test",
+      firstName: "Citizen User",
+      lastName: "Odeda",
+      role: Role.citizen,
+      // Plain password: Citizen123!
+      password: "Citizen123!",
+    },
+    {
+      email: "fieldofficer@odeda.test",
+      firstName: "Field Officer",
+      lastName: "Odeda",
+      role: Role.field_officer,
+      // Plain password: FieldOfficer123!
+      password: "FieldOfficer123!",
+    },
+    {
+      email: "evans@joemarineng.com",
+      firstName: "LGA Admin",
+      lastName: "Odeda",
+      role: Role.lga_admin,
+      // Plain password: LgaAdmin123!
+      password: "LgaAdmin123!",
+    },
+  ];
+
+  for (const u of users) {
+    const hashed = await bcrypt.hash(u.password, 10);
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: {
+        firstName: u.firstName,
+        lastName: u.lastName,
+        role: u.role,
+        password: hashed,
+        isActive: true,
+      },
+      create: {
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        role: u.role,
+        password: hashed,
+        isActive: true,
+      },
+    });
+    console.log(`✅ User seeded: ${u.email} (${u.role})`);
+  }
   console.log("✅ Odeda services and service fees seeded successfully");
 }
 

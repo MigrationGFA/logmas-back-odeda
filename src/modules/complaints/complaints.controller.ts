@@ -57,7 +57,7 @@ export const raiseComplaint = async (req: Request, res: Response, next: NextFunc
 
     await prisma.auditLog.create({
       data: {
-        action: 'complaint_raised',
+        action: 'complaint_logged',
         entity: 'Complaint',
         entityId: complaint.id,
         userId,
@@ -65,7 +65,7 @@ export const raiseComplaint = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    return sendSuccess(res, complaint, 'Complaint raised successfully', 201);
+    return sendSuccess(res, complaint, 'Complaint logged successfully', 201);
   } catch (err) { next(err); }
 };
 

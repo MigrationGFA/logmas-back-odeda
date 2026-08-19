@@ -4,16 +4,16 @@ import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/authorize.middleware';
 import { validateBody, validateQuery } from '../../middleware/validate.middleware';
 import {
-  registerBusiness,
-  generateInvoice,
+  // registerBusiness,
+  // generateInvoice,
   recordPayment,
-  issuePermit,
+  // issuePermit,
   verifyReceipt,
   getMyCollections,
   getCollectionSummary,
-  getAllWardBusinesses,
-  getWardPermits,
-  issueDemandNotice,
+  // getAllWardBusinesses,
+  // getWardPermits,
+  // issueDemandNotice,
   logViolation,
 } from './field.controller';
 import {
@@ -40,7 +40,7 @@ const guard = [requireAuth, requireRole('field_officer')];
  *     security:
  *       - BearerAuth: []
  */
-router.post('/businesses', ...guard, validateBody(registerBusinessSchema), registerBusiness);
+// router.post('/businesses', ...guard, validateBody(registerBusinessSchema), registerBusiness);
 
 /**
  * @openapi
@@ -60,7 +60,7 @@ router.post('/businesses', ...guard, validateBody(registerBusinessSchema), regis
  *         schema:
  *           type: string
  */
-router.get('/businesses', ...guard, getAllWardBusinesses);
+// router.get('/businesses', ...guard, getAllWardBusinesses);
 
 // ── INVOICES ──────────────────────────────────────────────────
 
@@ -73,20 +73,20 @@ router.get('/businesses', ...guard, getAllWardBusinesses);
  *     security:
  *       - BearerAuth: []
  */
-router.post('/invoices', ...guard, validateBody(generateInvoiceSchema), generateInvoice);
+// router.post('/invoices', ...guard, validateBody(generateInvoiceSchema), generateInvoice);
 
 // ── PAYMENTS ──────────────────────────────────────────────────
 
 /**
  * @openapi
- * /field-officer/permits/:permitId/collect:
+ * /field-officer/invoices/:invoiceId/collect:
  *   post:
  *     tags: [Field Officer]
  *     summary: Record a cash or POS payment — auto-generates receipt on full payment
  *     security:
  *       - BearerAuth: []
  */
-router.post('/permits/:permitId/collect', ...guard, validateBody(recordPaymentSchema), recordPayment);
+router.post('/invoices/:invoiceId/collect', ...guard, validateBody(recordPaymentSchema), recordPayment);
 
 // ── PERMITS ───────────────────────────────────────────────────
 
@@ -99,7 +99,7 @@ router.post('/permits/:permitId/collect', ...guard, validateBody(recordPaymentSc
  *     security:
  *       - BearerAuth: []
  */
-router.post('/permits/:permitId/demand-notice', ...guard, issueDemandNotice);
+// router.post('/permits/:permitId/demand-notice', ...guard, issueDemandNotice);
 
 /**
  * @openapi
@@ -110,7 +110,7 @@ router.post('/permits/:permitId/demand-notice', ...guard, issueDemandNotice);
  *     security:
  *       - BearerAuth: []
  */
-router.get('/permits', ...guard, getWardPermits);
+// router.get('/permits', ...guard, getWardPermits);
 
 router.post('/violations', ...guard, logViolation);
 

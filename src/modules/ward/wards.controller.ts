@@ -12,7 +12,7 @@ export const createWard = async (req: Request, res: Response, next: NextFunction
 
 export const getWards = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const datasets = await prisma.ward.findMany({ where: { deletedAt: null } });
+    const datasets = await prisma.ward.findMany({ where: {  } });
     return sendSuccess(res, datasets);
   } catch (err) { next(err); }
 };

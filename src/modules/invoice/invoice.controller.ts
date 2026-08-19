@@ -80,7 +80,7 @@ export const fetchInvoicesHubData = async ({
         in: ["pending"],
       };
     } else {
-      where.paymentStatus = tab;
+      where.paymentStatus = "failed";
     }
   }
 
@@ -180,9 +180,9 @@ export const fetchInvoicesHubData = async ({
       reference: invoice.invoiceNumber,
       amount: Number(invoice.amount),
       paymentStatus: invoice.paymentStatus,
-      dueDate: invoice.dueDate
-        ? invoice.dueDate.toISOString().split("T")[0]
-        : null,
+      // dueDate: invoice.dueDate
+      //   ? invoice.dueDate.toISOString().split("T")[0]
+      //   : null,
 
       application: invoice.application
         ? {
@@ -317,7 +317,7 @@ export const recordInvoicePayment = async (
     if (!invoice)
       return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
 
-    if (["paid", "cancelled"].includes(invoice.status)) {
+    if (["paid", "cancelled"].includes(invoice.paymentStatus)) {
       return sendError(
         res,
         "Invoice is already paid or cancelled",
@@ -338,7 +338,7 @@ export const recordInvoicePayment = async (
       );
     }
 
-    const paymentAmount = Number(amount ?? invoice.balanceDue);
+    const paymentAmount = Number(amount);
 
     const result = await confirmPayment({
       invoiceId: invoice.id,

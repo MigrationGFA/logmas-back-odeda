@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../utils/prisma';
 import { sendSuccess } from '../../utils/response';
 import { queryString } from '../complaints/complaints.controller';
+import { Prisma } from '@prisma/client';
 
 // ── Paystack-style period presets ─────────────────────────────
 // period=yesterday | last_week | this_month | all | custom (with from/to)
@@ -38,219 +39,336 @@ function buildDateRange(period?: string | null, from?: string | null, to?: strin
   }
 }
 
-// Returns { [field]: dateRange } normally, or {} when dateRange is undefined
-// (the "all" case) — so the Prisma where clause just omits the filter entirely
-// rather than filtering on an undefined range.
-// function dateFilter(field: string, dateRange?: { gte: Date; lte: Date }) {
-//   return dateRange ? { [field]: dateRange } : {};
-// }
+/**
+ * GET /api/v1/reports/overview?period=yesterday|last_week|this_month|all&from=&to=
+ *
+ * Reports overview.
+ *
+ * Revenue is calculated from confirmed payments and grouped by
+ * the Service attached to each Application.
+ */
+export const getReportsOverview = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const period = queryString(req.query.period);
+    const from = queryString(req.query.from);
+    const to = queryString(req.query.to);
 
-// /**
-//  * GET /api/v1/reports/overview?period=yesterday|last_week|this_month|all&from=&to=
-//  * Serves all data needed for the Reports page in one call.
-//  */
-// export const getReportsOverview = async (req: Request, res: Response, next: NextFunction) => {
-//   try {
-//     const period = queryString(req.query.period);
-//     const from = queryString(req.query.from);
-//     const to = queryString(req.query.to);
-//     const dateRange = buildDateRange(period, from, to);
+    const dateRange = buildDateRange(period, from, to);
 
-//     const [
-//       paymentsByMethod,
-//       receiptsWithContext, // renamed — now includes enough to classify service type
-//       invoicesByOfficer,
-//       recentInvoices,
-//       recentReceipts,
-//     ] = await Promise.all([
-//       prisma.payment.groupBy({
-//         by: ['method'],
-//         where: { status: 'confirmed', ...dateFilter('createdAt', dateRange) },
-//         _sum: { amount: true },
-//         _count: { _all: true },
-//       }),
+    const paymentWhere: Prisma.PaymentWhereInput = {
+      status: "confirmed",
+      ...(dateRange ? { confirmedAt: dateRange } : {}),
+    };
 
-//       // Revenue grouped by service — now pulls enough of the invoice's relations
-//       // to classify SOO vs Permit vs plain Levy, not just category name.
-//       prisma.receipt.findMany({
-//         where: dateFilter('issuedAt', dateRange),
-//         include: {
-//           invoice: {
-//             include: {
-//               application: {
-//                 select: {
-//                   id: true,
-//                   fullName: true,
-//                   applicantId: true,
-//                   service: { select: { code: true, name: true, category: true } },
-//                 },
-//               },
-//             },
-//           },
-//         },
-//       }),
+    const [
+      payments,
+      recentInvoices,
+      recentReceipts,
+    ] = await Promise.all([
+      // All confirmed payments for the selected period.
+      // Service is reached through:
+      // Payment → Invoice → Application → Service
+      prisma.payment.findMany({
+        where: paymentWhere,
+        select: {
+          amount: true,
+          method: true,
+          confirmedAt: true,
 
-//       prisma.invoice.groupBy({
-//         by: ['assignedOfficerId'],
-//         where: { ...dateFilter('createdAt', dateRange), assignedOfficerId: { not: null } },
-//         _sum: { amount: true },
-//         _count: { _all: true },
-//       }),
+          invoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
 
-//       prisma.invoice.findMany({
-//         where: dateFilter('createdAt', dateRange),
-//         take: 20,
-//         orderBy: { createdAt: 'desc' },
-//         include: {
-//           application: {
-//             include: {
-//               service: { select: { name: true, code: true } },
-//               applicant: { select: { firstName: true, lastName: true } },
-//               createdBy: { select: { firstName: true, lastName: true } },
-//             },
-//           },
-//         },
-//       }),
+              application: {
+                select: {
+                  applicationNumber: true,
 
-//       prisma.receipt.findMany({
-//         where: dateFilter('issuedAt', dateRange),
-//         take: 20,
-//         orderBy: { issuedAt: 'desc' },
-//         include: {
-//           issuedBy: { select: { firstName: true, lastName: true } },
-//           invoice: {
-//             include: {
-//               application: {
-//                 include: {
-//                   service: { select: { name: true } },
-//                   createdBy: { select: { firstName: true, lastName: true } },
-//                 },
-//               },
-//               payments: {
-//                 where: { status: 'confirmed' },
-//                 orderBy: { createdAt: 'desc' },
-//                 take: 1,
-//                 select: { method: true },
-//               },
-//             },
-//           },
-//         },
-//       }),
-//     ]);
+                  service: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      category: true,
+                      revenueHead: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
 
-//     // ── Officer enrichment ────────────────────────────────────
-//     const officerIds = invoicesByOfficer.map((r) => r.assignedOfficerId).filter(Boolean) as string[];
-//     const officers = await prisma.user.findMany({
-//       where: { id: { in: officerIds } },
-//       select: { id: true, firstName: true, lastName: true, ward: { select: { name: true } } },
-//     });
-//     const officerMap = Object.fromEntries(officers.map((o) => [o.id, o]));
+      // Recent invoices
+      prisma.invoice.findMany({
+        where: dateRange ? { createdAt: dateRange } : {},
+        take: 20,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          amount: true,
+          paymentStatus: true,
+          paidAt: true,
+          createdAt: true,
 
-//     // ── Stat cards ─────────────────────────────────────────────
-//     const totalRevenue = paymentsByMethod.reduce((sum, m) => sum + Number(m._sum.amount ?? 0), 0);
-//     const byMethod = paymentsByMethod.reduce((acc: Record<string, number>, m) => {
-//       acc[m.method] = Number(m._sum.amount ?? 0);
-//       return acc;
-//     }, {});
+          application: {
+            select: {
+              applicationNumber: true,
+              formData: true,
 
-//     // ── Classify every receipt by service type AND category in one pass ──
-//     const serviceTypeMap: Record<string, { transactions: number; revenue: number }> = {
-//       state_of_origin: { transactions: 0, revenue: 0 },
-//       permit: { transactions: 0, revenue: 0 },
-//       levy: { transactions: 0, revenue: 0 },
-//     };
-//     const levyMap: Record<string, { type: string; transactions: number; revenue: number }> = {};
+              service: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  revenueHead: true,
+                },
+              },
+            },
+          },
+        },
+      }),
 
-//     for (const r of receiptsWithContext) {
-//       const isStateOfOrigin = !!r.invoice?.stateOfOriginApplication;
-//       const isPermit = !!r.invoice?.permit;
-//       const serviceType = r.invoice?.application?.service?.code === 'state_of_origin' ? 'state_of_origin' : r.invoice?.application?.service?.code === 'business_permit' ? 'permit' : 'levy';
+      // Recent receipts
+      prisma.receipt.findMany({
+        where: dateRange ? { issuedAt: dateRange } : {},
+        take: 20,
+        orderBy: { issuedAt: "desc" },
+        select: {
+          id: true,
+          receiptNumber: true,
+          amountPaid: true,
+          issuedAt: true,
 
-//       serviceTypeMap[serviceType].transactions += 1;
-//       serviceTypeMap[serviceType].revenue += Number(r.amountPaid);
+          issuedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
 
-//       const categoryKey = r.invoice?.application?.service?.name ?? 'Other';
-//       if (!levyMap[categoryKey]) levyMap[categoryKey] = { type: serviceType, transactions: 0, revenue: 0 };
-//       levyMap[categoryKey].transactions += 1;
-//       levyMap[categoryKey].revenue += Number(r.amountPaid);
-//     }
+          invoice: {
+            select: {
+              invoiceNumber: true,
 
-//     const byServiceType = [
-//       { type: 'state_of_origin', label: 'State of Origin', ...serviceTypeMap.state_of_origin },
-//       { type: 'permit', label: 'Trade Permits', ...serviceTypeMap.permit },
-//       { type: 'levy', label: 'Levies', ...serviceTypeMap.levy },
-//     ];
+              application: {
+                select: {
+                  applicationNumber: true,
+                  formData: true,
 
-//     const byLevy = Object.entries(levyMap)
-//       .map(([levy, data]) => ({ levy, type: data.type, transactions: data.transactions, revenue: data.revenue }))
-//       .sort((a, b) => b.revenue - a.revenue);
+                  service: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      revenueHead: true,
+                    },
+                  },
+                },
+              },
 
-//     // ── By officer ─────────────────────────────────────────────
-//     const byOfficer = invoicesByOfficer
-//       .map((row) => {
-//         const officer = officerMap[row.assignedOfficerId!];
-//         return {
-//           id: row.assignedOfficerId,
-//           name: officer ? `${officer.firstName} ${officer.lastName}` : 'Unknown',
-//           ward: officer?.ward?.name ?? '—',
-//           invoicesIssued: row._count._all,
-//           totalCollected: 0,
-//           totalInvoiced: Number(row._sum.amount ?? 0),
-//         };
-//       })
-//       .sort((a, b) => b.totalCollected - a.totalCollected);
+              payments: {
+                where: {
+                  status: "confirmed",
+                },
+                orderBy: {
+                  confirmedAt: "desc",
+                },
+                take: 1,
+                select: {
+                  method: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
 
-//     // ── Invoices / receipts tabs ────────────────────────────────
-//     const invoices = recentInvoices.map((inv) => ({
-//       id: inv.id,
-//       reference: inv.invoiceNumber,
-//       customerName: inv.application?.fullName ?? `${inv.application?.createdBy?.firstName ?? ''} ${inv.application?.createdBy?.lastName ?? ''}`.trim() || 'Unknown',
-//       levyType: inv.application?.service?.name ?? inv.application?.service?.code ?? '—',
-//       status: inv.paymentStatus,
-//       amount: Number(inv.amount),
-//       dueDate: null,
-//       paidAt: inv.paidAt,
-//     }));
+    // ---------------------------------------------------------
+    // Revenue statistics
+    // ---------------------------------------------------------
 
-//     const receipts = recentReceipts.map((r) => ({
-//       id: r.id,
-//       receiptNumber: r.receiptNumber,
-//       customerName: r.invoice.application?.fullName ?? `${r.invoice.application?.createdBy?.firstName ?? ''} ${r.invoice.application?.createdBy?.lastName ?? ''}`.trim() || 'Unknown',
-//       paymentMethod: r.invoice.payments?.[0]?.method ?? 'online_gateway',
-//       officerName: `${r.issuedBy.firstName} ${r.issuedBy.lastName}`,
-//       amount: Number(r.amountPaid),
-//       levyType: r.invoice.application?.service?.name ?? '—',
-//       paidAt: r.issuedAt,
-//     }));
+    let totalRevenue = 0;
 
-//     return sendSuccess(res, {
-//       period: { preset: period ?? 'this_month', from: dateRange?.gte ?? null, to: dateRange?.lte ?? null },
+    const byMethod: Record<string, number> = {};
 
-//       stats: {
-//         totalRevenue,
-//         byMethod: {
-//           transfer: byMethod['bank_transfer'] ?? 0,
-//           pos: byMethod['pos'] ?? 0,
-//           cash: byMethod['cash'] ?? 0,
-//           online: byMethod['online_gateway'] ?? byMethod['virtual_account'] ?? 0,
-//         },
-//       },
+    const serviceRevenueMap = new Map<
+      string,
+      {
+        id: string;
+        code: string;
+        name: string;
+        revenueHead: string;
+        transactions: number;
+        revenue: number;
+      }
+    >();
 
-//       // NEW — this is what your boss asked for: the 3-way service breakdown
-//       byServiceType,
+    for (const payment of payments) {
+      const amount = Number(payment.amount);
 
-//       // byLevy now carries a `type` tag per row so the frontend can group/filter
-//       // within this tab by service type too, not just show a flat category list
-//       byLevy,
+      totalRevenue += amount;
 
-//       byOfficer,
-//       invoices,
-//       receipts,
-//     });
-//   } catch (err) {
-//     next(err);
-//   }
-// };
+      // Payment method breakdown
+      const method = payment.method;
+      byMethod[method] = (byMethod[method] || 0) + amount;
+
+      // Service breakdown
+      const service = payment.invoice.application?.service;
+
+      if (!service) {
+        continue;
+      }
+
+      const existing = serviceRevenueMap.get(service.id);
+
+      if (existing) {
+        existing.revenue += amount;
+        existing.transactions += 1;
+      } else {
+        serviceRevenueMap.set(service.id, {
+          id: service.id,
+          code: service.code,
+          name: service.name,
+          revenueHead: service.revenueHead,
+          transactions: 1,
+          revenue: amount,
+        });
+      }
+    }
+
+    const byService = Array.from(serviceRevenueMap.values()).sort(
+      (a, b) => b.revenue - a.revenue,
+    );
+
+    // ---------------------------------------------------------
+    // Recent invoices
+    // ---------------------------------------------------------
+
+    const invoices = recentInvoices.map((invoice) => {
+      const formData =
+        invoice.application?.formData &&
+        typeof invoice.application.formData === "object"
+          ? (invoice.application.formData as Record<string, any>)
+          : {};
+
+      const customerName =
+        formData.fullName ||
+        formData.applicantName ||
+        formData.ownerName ||
+        formData.businessName ||
+        formData.companyName ||
+        "Unknown";
+
+      return {
+        id: invoice.id,
+        reference: invoice.invoiceNumber,
+        applicationNumber:
+          invoice.application?.applicationNumber ?? null,
+        customerName,
+        service: invoice.application?.service
+          ? {
+              id: invoice.application.service.id,
+              code: invoice.application.service.code,
+              name: invoice.application.service.name,
+              revenueHead: invoice.application.service.revenueHead,
+            }
+          : null,
+        amount: Number(invoice.amount),
+        paymentStatus: invoice.paymentStatus,
+        paidAt: invoice.paidAt,
+        createdAt: invoice.createdAt,
+      };
+    });
+
+    // ---------------------------------------------------------
+    // Recent receipts
+    // ---------------------------------------------------------
+
+    const receipts = recentReceipts.map((receipt) => {
+      const formData =
+        receipt.invoice.application?.formData &&
+        typeof receipt.invoice.application.formData === "object"
+          ? (receipt.invoice.application.formData as Record<string, any>)
+          : {};
+
+      const customerName =
+        formData.fullName ||
+        formData.applicantName ||
+        formData.ownerName ||
+        formData.businessName ||
+        formData.companyName ||
+        "Unknown";
+
+      const issuedBy = receipt.issuedBy;
+
+      return {
+        id: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        invoiceNumber: receipt.invoice.invoiceNumber,
+        applicationNumber:
+          receipt.invoice.application?.applicationNumber ?? null,
+        customerName,
+        service: receipt.invoice.application?.service
+          ? {
+              id: receipt.invoice.application.service.id,
+              code: receipt.invoice.application.service.code,
+              name: receipt.invoice.application.service.name,
+              revenueHead: receipt.invoice.application.service.revenueHead,
+            }
+          : null,
+        paymentMethod:
+          receipt.invoice.payments[0]?.method ?? null,
+        officerName: issuedBy
+          ? `${issuedBy.firstName} ${issuedBy.lastName}`.trim()
+          : null,
+        amount: Number(receipt.amountPaid),
+        issuedAt: receipt.issuedAt,
+      };
+    });
+
+    // ---------------------------------------------------------
+    // Response
+    // ---------------------------------------------------------
+
+    return sendSuccess(res, {
+      period: {
+        preset: period ?? "this_month",
+        from: dateRange?.gte ?? null,
+        to: dateRange?.lte ?? null,
+      },
+
+      stats: {
+        totalRevenue,
+
+        byMethod: {
+          transfer: byMethod["bank_transfer"] ?? 0,
+          pos: byMethod["pos"] ?? 0,
+          cash: byMethod["cash"] ?? 0,
+          online:
+            (byMethod["online_gateway"] ?? 0) +
+            (byMethod["virtual_account"] ?? 0),
+        },
+      },
+
+      // Revenue generated by each actual service
+      byService,
+
+      invoices,
+      receipts,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 // /**
 //  * GET /api/v1/reports/export/invoices

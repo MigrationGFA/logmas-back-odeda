@@ -4,6 +4,7 @@ import { login, register, getMe, googleLogin, refreshToken, updateUserProfile, f
 import { validateBody } from '../../middleware/validate.middleware';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { registerSchema, loginSchema, googleAuthSchema } from './auth.validation';
+import { authLimiter } from '../../middleware/rateLimiters.middleware';
 
 const router = Router();
 
@@ -121,7 +122,8 @@ const router = Router();
  *                   type: string
  *                   example: "CONFLICT"
  */
-router.post('/register', validateBody(registerSchema), register);
+// router.post('/register', validateBody(registerSchema), register);
+router.post('/register',authLimiter, validateBody(registerSchema), register);
 
 /**
  * @openapi
@@ -190,7 +192,8 @@ router.post('/register', validateBody(registerSchema), register);
  *       400:
  *         description: Validation error
  */
-router.post('/login', validateBody(loginSchema), login);
+// router.post('/login', validateBody(loginSchema), login);
+router.post('/login',authLimiter, validateBody(loginSchema), login);
 
 /**
  * @openapi
@@ -402,10 +405,12 @@ router.get('/me', requireAuth, getMe);
  */
 router.post('/refresh', refreshToken);
 
-router.patch('/update/profile/:id',requireAuth, updateUserProfile);
+// router.patch('/update/profile/:id',requireAuth, updateUserProfile);
+router.patch('/update/profile/:id',requireAuth,authLimiter, updateUserProfile);
 
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
-router.patch('/change-password',requireAuth, changePassword);
+// router.patch('/change-password',requireAuth, changePassword);
+router.patch('/change-password',requireAuth,authLimiter, changePassword);
 
 export default router;

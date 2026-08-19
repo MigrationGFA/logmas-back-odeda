@@ -34,7 +34,7 @@ pkill -u getfjupm node
 
 npx prisma db push
 
-npx prisma migrate dev --name added_to_invoice
+npx prisma migrate dev --name updated_user
 
 
 # seed plan for revenue category if need be

@@ -55,21 +55,6 @@ const globalLimiter = rateLimit({
   },
 });
 
-// 2. Strict Auth Limiter: Protect login/register/password-reset from brute-force (e.g., 5 requests per 15 mins)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 10, // Max 10 attempts per IP per 15 minutes
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    status: "error",
-    error: {
-      code: "TOO_MANY_REQUESTS",
-      message: "Too many authentication attempts. Please wait 15 minutes before trying again.",
-      details: null,
-    },
-  },
-});
 
 // Apply global rate limiting to all requests
 app.use(globalLimiter);
@@ -92,7 +77,7 @@ app.use(express.json());
 // API Engine Base Routing Architecture
 // app.use('/api/v1/auth', authRoutes);
 app.use("/api/v1/services", serviceRoutes);
-app.use('/api/v1/auth', authLimiter, authRoutes);
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/wards', wardRoutes);
 app.use('/api/v1/lga', lgaRoutes);

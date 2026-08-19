@@ -77,6 +77,7 @@ export const createApplication = async (params: CreateAppParams & { files?: Uplo
         applicationId: application.id,
         amount: feeAmount,
         paymentStatus: 'pending',
+        createdById: createdById || applicantId || null,
       },
     });
 

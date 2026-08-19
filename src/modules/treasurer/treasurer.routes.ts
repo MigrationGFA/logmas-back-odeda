@@ -13,6 +13,7 @@ import {
   upsertServiceFee,
   getTreasuryOverview,
   getReconciliation,
+  getFieldOfficersList,
 
 } from "./treasurer.controller";
 import {
@@ -64,11 +65,11 @@ const router = Router();
  */
 
 router.use(requireAuth);
-// router.get(
-//   "/field-officers",
-//   requireRole("agent", "lga_admin", "treasurer", "contractor"),
-//   getFieldOfficersList,
-// );
+router.get(
+  "/field-officers",
+  requireRole("agent", "lga_admin", "treasurer", "contractor"),
+  getFieldOfficersList,
+);
 
 // Enforce strict treasury access - only treasurer, finance, or super admin
 // router.use(requireRole("treasurer", "super_admin", "lga_admin"));

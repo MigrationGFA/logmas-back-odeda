@@ -66,37 +66,24 @@ export const listWards = async (
       prisma.ward.findMany({
         skip,
         take: limit,
-        where: { deletedAt: null },
+        // where: { deletedAt: null },
         include: {
-          // 🚀 TARGET THE RE-MAPPED 1-TO-1 RELATION LINK
-          councillor: {
-            where: { deletedAt: null },
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              isActive: true,
-              phone: true,
-            },
-          },
+     
           _count: {
             select: {
               complaints: true,
-              stateOfOriginApplications: true,
-              businesses: true,
+              // businesses: true,
             },
           },
         },
         orderBy: { name: "asc" },
       }),
-      prisma.ward.count({ where: { deletedAt: null } }),
+      prisma.ward.count({ where: { } }),
     ]);
 
     // Format output payload array to match what your UI layout table expects
     const formattedWards = wards.map((w) => ({
       ...w,
-      councillors: w.councillor ? [w.councillor] : [], // Wraps object in an array so frontend doesn't crash if it expects an array list loop
     }));
 
     return sendSuccess(res, {
@@ -479,7 +466,7 @@ export const listStaff = async (
 
     const where: any = {
       role: { in: role ? [role] : staffRoles },
-      deletedAt: null,
+      // deletedAt: null,
       ...(wardId !== undefined && { wardId }),
       ...(isActive !== undefined && { isActive }),
     };
@@ -499,8 +486,6 @@ export const listStaff = async (
           isActive: true,
           wardId: true,
           ward: { select: { id: true, name: true } },
-          contractorId: true,
-          contractor: { select: { id: true, firstName: true, lastName: true } },
           createdAt: true,
           lastLoginAt: true,
         },
@@ -802,6 +787,12 @@ export const toggleStaffStatus = async (
  * High-level stats for the LGA Admin dashboard.
  * No financial data — that belongs to Treasurer.
  */
+/**
+ * GET /api/v1/lga-admin/overview
+ *
+ * High-level stats for the LGA Admin dashboard.
+ * No financial data — that belongs to Treasurer.
+ */
 export const getAdminOverview = async (
   req: Request,
   res: Response,
@@ -817,25 +808,27 @@ export const getAdminOverview = async (
     ] = await Promise.all([
       // StatCard 1 — Citizens
       prisma.user.count({
-        where: { role: "citizen", deletedAt: null, isActive: true },
+        where: {
+          role: "citizen",
+          // deletedAt: null,
+          isActive: true,
+        },
       }),
 
       // StatCard 2 — Field Officers
       prisma.user.count({
-        where: { role: "field_officer", deletedAt: null, isActive: true },
+        where: {
+          role: "field_officer",
+          // deletedAt: null,
+          isActive: true,
+        },
       }),
 
       // StatCard 3 — Pending Applications
-      prisma.stateOfOriginApplication.count({
+      prisma.application.count({
         where: {
           status: {
-            in: [
-              "submitted",
-              "payment_pending",
-              "paid",
-              "under_review",
-              "forwarded_to_councillor",
-            ],
+            in: ["submitted", "under_review"],
           },
         },
       }),
@@ -844,18 +837,36 @@ export const getAdminOverview = async (
       prisma.invoice.count(),
 
       // Table — Applications awaiting review
-      prisma.stateOfOriginApplication.findMany({
+      prisma.application.findMany({
         where: {
-          status: { in: ["paid", "under_review", "forwarded_to_councillor"] },
+          status: {
+            in: ["submitted", "under_review"],
+          },
         },
         take: 10,
-        orderBy: { createdAt: "desc" },
+        orderBy: {
+          createdAt: "desc",
+        },
         select: {
           id: true,
-          applicationNo: true,
-          fullName: true,
+          applicationNumber: true,
           status: true,
-          ward: { select: { name: true } },
+
+          applicant: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+
+          service: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              category: true,
+            },
+          },
         },
       }),
     ]);
@@ -867,18 +878,31 @@ export const getAdminOverview = async (
         pendingApplications,
         totalInvoices,
       },
-      recentApplications: recentApplications.map((a) => ({
-        id: a.applicationNo, // UI reads a.id as display ref
-        applicant: a.fullName, // UI reads a.applicant
-        ward: a.ward?.name ?? "—", // UI reads a.ward
-        status: a.status, // UI reads a.status → StatusBadge
+
+      recentApplications: recentApplications.map((application) => ({
+        id: application.id,
+        applicationNumber: application.applicationNumber,
+
+        applicant: application.applicant
+          ? `${application.applicant.firstName} ${application.applicant.lastName}`.trim()
+          : "—",
+
+        service: application.service
+          ? {
+              id: application.service.id,
+              code: application.service.code,
+              name: application.service.name,
+              category: application.service.category,
+            }
+          : null,
+
+        status: application.status,
       })),
     });
   } catch (err) {
     next(err);
   }
 };
-
 // Roles LGA Admin can see and manage
 const LGA_MANAGEABLE_ROLES: Role[] = [
   "chairman",
@@ -926,7 +950,7 @@ export const getAccountsOverview = async (
 
     const baseWhere: any = {
       role: { in: rolesScope },
-      deletedAt: null,
+      // deletedAt: null,
     };
 
     // Search filter
@@ -978,10 +1002,7 @@ export const getAccountsOverview = async (
             // Ward link — for councillors this is their assignedWard
             // For others it's their home ward
             ward: { select: { id: true, name: true } },
-            // Contractor hierarchy
-            contractor: {
-              select: { id: true, firstName: true, lastName: true },
-            },
+        
           },
           orderBy: { createdAt: "desc" },
         }),
@@ -1004,9 +1025,6 @@ export const getAccountsOverview = async (
       createdAt: u.createdAt.toISOString().split("T")[0],
       suspendedAt: u.suspendedAt?.toISOString() ?? null,
       suspensionReason: u.suspensionReason ?? null,
-      contractor: u.contractor
-        ? `${u.contractor.firstName} ${u.contractor.lastName}`
-        : null,
     }));
 
     return sendSuccess(res, {
@@ -1745,7 +1763,7 @@ export const getAllPermits = async (
           where: { status: { in: ["pending_payment", "paid"] } },
         }),
         prisma.invoice.aggregate({
-          where: { permit: { isNot: null }, status: {in:["paid"] }},
+          where: { permit: { isNot: null }, status: { in: ["paid"] } },
           _sum: { amountPaid: true },
         }),
         prisma.user.count({

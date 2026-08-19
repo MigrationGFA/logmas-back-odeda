@@ -79,14 +79,9 @@ export async function confirmPayment({
       },
     });
 
-    const amountPaid = Number(
-      confirmedPayments._sum.amount || 0,
-    );
+    const amountPaid = Number(confirmedPayments._sum.amount || 0);
 
-    const balanceDue = Math.max(
-      Number(invoice.amount) - amountPaid,
-      0,
-    );
+    const balanceDue = Math.max(Number(invoice.amount) - amountPaid, 0);
 
     return {
       alreadyProcessed: true,
@@ -125,24 +120,15 @@ export async function confirmPayment({
     },
   });
 
-  const amountAlreadyPaid = Number(
-    confirmedPayments._sum.amount || 0,
-  );
+  const amountAlreadyPaid = Number(confirmedPayments._sum.amount || 0);
 
   const invoiceAmount = Number(invoice.amount);
 
-  const remainingBeforePayment = Math.max(
-    invoiceAmount - amountAlreadyPaid,
-    0,
-  );
+  const remainingBeforePayment = Math.max(invoiceAmount - amountAlreadyPaid, 0);
 
-  const newAmountPaid =
-    amountAlreadyPaid + Number(amount);
+  const newAmountPaid = amountAlreadyPaid + Number(amount);
 
-  const newBalanceDue = Math.max(
-    invoiceAmount - newAmountPaid,
-    0,
-  );
+  const newBalanceDue = Math.max(invoiceAmount - newAmountPaid, 0);
 
   const isFullPayment = newBalanceDue === 0;
 
@@ -198,6 +184,15 @@ export async function confirmPayment({
       },
     });
 
+     await tx.invoice.update({
+      where: {
+        id: invoiceId,
+      },
+      data: {
+        paymentStatus: isFullPayment ? "confirmed" : "failed",
+      },
+    });
+
     // -------------------------------------------------------
     // 5. Create receipt only when invoice is fully paid
     // -------------------------------------------------------
@@ -213,10 +208,7 @@ export async function confirmPayment({
       if (existingReceipt) {
         receipt = existingReceipt;
       } else {
-        const issuerId =
-          confirmedById ||
-          paidById ||
-          invoice.createdById;
+        const issuerId = confirmedById || paidById || invoice.createdById;
 
         receipt = await tx.receipt.create({
           data: {

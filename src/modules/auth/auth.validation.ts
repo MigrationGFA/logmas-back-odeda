@@ -6,7 +6,7 @@ export const registerSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   // role: z.enum(['business_owner', 'citizen']).optional()
-  role: z.enum(['super_admin', 'lga_admin', 'chairman', 'treasurer', 'auditor', 'contractor', 'field_officer', 'citizen',"business_owner"]).optional()
+  role: z.enum(['citizen',"business_owner"]).optional()
 });
 
 export const loginSchema = z.object({

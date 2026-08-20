@@ -171,21 +171,28 @@ model User {
   tokenVersion Int     @default(0)
 
   // Profile Information
-  avatarUrl    String?
-  dateOfBirth  DateTime?
-  gender       String?
-  address      String?
-  town         String?
-  occupation   String?
-  nin          String?   @unique
-  cacNumber    String?   @unique
-  businessName String?
-  businessType String?
-  taxIdNumber  String?
+  avatarUrl          String?
+  dateOfBirth        String?
+  gender             String?
+  address            String?
+  town               String?
+  occupation         String?
+  nin                String?   @unique
+  cacNumber          String?   @unique
+  businessName       String?
+  businessType       String?
+  taxIdNumber        String?
+  emergencyContact   String?   // Added: Emergency contact
+  identificationType String?   // Added: Type of ID (NIN, Voter's Card, etc.)
+  identificationNumber String? // Added: ID number (if different from NIN)
+  ownerRepresentative String?  // Added: For businesses - owner or representative name
+  passportPhoto      String?   // Added: URL to passport photograph
 
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive            Boolean   @default(true)
+  onboardingCompleted Boolean   @default(false)
+  emailVerifiedAt     DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   passwordResetRequired       Boolean   @default(false) // MISSING ITEM ADDED: Forces user password update on next login
   lastLoginAt                 DateTime?
@@ -199,9 +206,11 @@ model User {
   notifyBySms                 Boolean   @default(true)
   notifyByInApp               Boolean   @default(true)
 
-   createdById  String? // MISSING ITEM ADDED: Tracks who registered this user account globally
-  createdBy    User?   @relation("UserCreator", fields: [createdById], references: [id])
-  createdUsers User[]  @relation("UserCreator")
+  createdById                     String? // MISSING ITEM ADDED: Tracks who registered this user account globally
+  createdBy                       User?     @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers                    User[]    @relation("UserCreator")
+  emailVerificationToken          String?   @unique
+  emailVerificationTokenExpiresAt DateTime?
 
   // Ward association
   wardId String?
@@ -212,8 +221,8 @@ model User {
   reviewedApplications Application[]      @relation("AdminReviews")
   createdApplications  Application[]      @relation("ApplicationCreatedBy")
   feeUpdatesMade       ServiceFeeConfig[] @relation("TreasuryFeeUpdates")
-    invoicesCreated           Invoice[]                  @relation("InvoiceCreatedBy")
-  invoicesAssignedTo        Invoice[]                  @relation("InvoiceAssignedOfficer")
+  invoicesCreated      Invoice[]          @relation("InvoiceCreatedBy")
+  invoicesAssignedTo   Invoice[]          @relation("InvoiceAssignedOfficer")
   invoicesAssigned     Invoice[]
   payments             Payment[]
   certificatesIssued   Certificate[]      @relation("CertificateIssuedBy")
@@ -392,10 +401,10 @@ model Invoice {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   receipts  Receipt[]
+  users     User[]    @relation("InvoiceAssignedOfficer")
 
   @@index([paymentStatus])
   @@map("invoices")
-  users User[] @relation("InvoiceAssignedOfficer")
 }
 
 model Payment {

@@ -9,6 +9,8 @@ declare global {
         email: string;
         wardId?: string | null;
         tokenVersion: number;
+        onboardingCompleted:boolean,
+        emailVerifiedAt: Date
       };
     }
   }

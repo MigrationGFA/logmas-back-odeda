@@ -19,16 +19,28 @@ export const register = async (
   try {
     const { email, password, firstName, lastName, role } = req.body;
 
-    // Only these two roles can self-register
+    // Only citizens and business owners can self-register
     const allowedSelfRegisterRoles = ["citizen", "business_owner"];
+
     const assignedRole =
       role && allowedSelfRegisterRoles.includes(role) ? role : "citizen";
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser)
-      return sendError(res, "Email already registered", "CONFLICT", null, 409);
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
 
-    const hashedPassword = await bcrypt.hash(password, 12); // bump to 12 rounds
+    if (existingUser) {
+      return sendError(res, "Email already registered", "CONFLICT", null, 409);
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+
+    const verificationExpiresAt = new Date(
+      Date.now() + 30 * 60 * 1000, // 30 minutes
+    );
+
     const user = await prisma.user.create({
       data: {
         email,
@@ -36,47 +48,66 @@ export const register = async (
         firstName,
         lastName,
         role: assignedRole,
+
+        isActive: true,
+
+        emailVerificationToken: verificationToken,
+        emailVerificationTokenExpiresAt: verificationExpiresAt,
       },
     });
+    // TODO:
+    // Generate email verification token
+    // Store hashed token
+    // Send verification email
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      // Log failed attempt before returning
-      await prisma.auditLog.create({
-        data: {
-          action: "login_failed",
-          details: JSON.stringify({ email }),
-          ipAddress: req.ip,
-        },
-      });
-      return sendError(res, "Invalid credentials", "UNAUTHORIZED", null, 401);
-    }
+    const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
 
-    // Check if account is suspended
-    // If your user model supports account suspension, ensure 'isActive' exists in the schema and is selected here.
-    // Otherwise, remove or adjust this check.
-    // if (user.deletedAt !== null) {
-    //   return sendError(
-    //     res,
-    //     "Account suspended. Contact administrator.",
-    //     "FORBIDDEN",
-    //     null,
-    //     403,
-    //   );
-    // }
-
-    // Log successful login
     await prisma.auditLog.create({
       data: {
-        action: "login",
+        action: "user_created",
         userId: user.id,
         entity: "User",
         entityId: user.id,
+        details: {
+          role: assignedRole,
+          emailVerificationRequired: true,
+        },
         ipAddress: req.ip,
       },
     });
 
+    try {
+      await notify({
+        userId: user.id,
+        to: {
+          email: user.email,
+        },
+        templateKey: "account.verifyEmail",
+        vars: {
+          applicant_name: `${user.firstName} ${user.lastName}`,
+          verification_link: verificationLink,
+          expiration_time: "30 minutes",
+        },
+        channels: ["email"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[forgotPassword] notify() failed, continuing anyway:",
+        notifyErr,
+      );
+    }
+
     const { password: _, ...userResponse } = user;
-    return sendSuccess(res, userResponse, null, 201);
+
+    return sendSuccess(
+      res,
+      {
+        user: userResponse,
+        emailVerificationRequired: true,
+      },
+      "Account created. Please verify your email before signing in.",
+      201,
+    );
   } catch (err) {
     next(err);
   }
@@ -125,11 +156,10 @@ export const login = async (
       tokenVersion,
     });
     const refreshToken = generateRefreshToken({ id: user.id });
-    console.log(accessToken, "❤️");
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { },
+      data: { lastLoginAt: new Date() },
     });
 
     return sendSuccess(res, {
@@ -141,6 +171,8 @@ export const login = async (
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        emailVerifiedAt:user.emailVerifiedAt,
+        onboardingCompleted: user.onboardingCompleted,
         isActive: user.isActive,
         // passwordResetRequired: user.passwordResetRequired, // NEW
       },
@@ -273,7 +305,7 @@ export const refreshToken = async (
     };
     const user = await prisma.user.findUnique({ where: { id: decoded.id } });
 
-    if (!user || !user.isActive ) {
+    if (!user || !user.isActive) {
       return sendError(res, "Invalid refresh token", "UNAUTHORIZED", null, 401);
     }
 
@@ -295,8 +327,6 @@ export const refreshToken = async (
   }
 };
 
-// PUT /api/v1/users/profile
-// PUT /api/v1/users/profile
 export const updateUserProfile = async (
   req: Request,
   res: Response,
@@ -316,73 +346,114 @@ export const updateUserProfile = async (
 
     const userId = req.user.id;
     const {
+      // Common fields
       firstName,
       lastName,
       phone,
+      email,
+      address,
+      town,
+      ward,
+      dateOfBirth,
+      gender,
+      emergencyContact,
+      avatarUrl,
+      passportPhoto,
+      
+      // Citizen fields
+      occupation,
+      identificationType,
+      identificationNumber,
+      nin,
+      
+      // Business fields
+      businessName,
+      businessType,
+      cacNumber,
+      taxIdNumber,
+      ownerRepresentative,
+      
+      // Onboarding status
+      onboardingCompleted,
+      
+      // Notification preferences
       notifyByEmail,
       notifyBySms,
       notifyByInApp,
     } = req.body;
 
-    // 2. Input validation checks for text fields
-    if (firstName !== undefined && typeof firstName !== "string") {
-      return sendError(
-        res,
-        "First name must be a valid string",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
-    if (lastName !== undefined && typeof lastName !== "string") {
-      return sendError(
-        res,
-        "Last name must be a valid string",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
-    if (phone !== undefined && typeof phone !== "string") {
-      return sendError(
-        res,
-        "Phone number must be a valid string",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
+    // 2. Input validation - define allowed fields and their types
+    const stringFields = {
+      firstName,
+      lastName,
+      phone,
+      email,
+      address,
+      town,
+      ward,
+      gender,
+      emergencyContact,
+      avatarUrl,
+      passportPhoto,
+      occupation,
+      identificationType,
+      identificationNumber,
+      nin,
+      businessName,
+      businessType,
+      cacNumber,
+      taxIdNumber,
+      ownerRepresentative,
+    };
+
+    // Validate string fields
+    for (const [key, value] of Object.entries(stringFields)) {
+      if (value !== undefined && typeof value !== "string") {
+        return sendError(
+          res,
+          `${key} must be a valid string`,
+          "BAD_REQUEST",
+          null,
+          400,
+        );
+      }
     }
 
-    // 3. Input validation checks for notification booleans
-    if (notifyByEmail !== undefined && typeof notifyByEmail !== "boolean") {
-      return sendError(
-        res,
-        "notifyByEmail must be a boolean value",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
-    if (notifyBySms !== undefined && typeof notifyBySms !== "boolean") {
-      return sendError(
-        res,
-        "notifyBySms must be a boolean value",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
-    }
-    if (notifyByInApp !== undefined && typeof notifyByInApp !== "boolean") {
-      return sendError(
-        res,
-        "notifyByInApp must be a boolean value",
-        "BAD_REQUEST",
-        null,
-        400,
-      );
+    // Validate boolean fields
+    const booleanFields = {
+      onboardingCompleted,
+      notifyByEmail,
+      notifyBySms,
+      notifyByInApp,
+    };
+
+    for (const [key, value] of Object.entries(booleanFields)) {
+      if (value !== undefined && typeof value !== "boolean") {
+        return sendError(
+          res,
+          `${key} must be a boolean value`,
+          "BAD_REQUEST",
+          null,
+          400,
+        );
+      }
     }
 
-    // 4. Duplicate phone number check - ONLY if phone is provided AND not empty
+    // Validate date field
+    // if (dateOfBirth !== undefined) {
+    //   const date = new Date(dateOfBirth);
+    //   if (isNaN(date.getTime())) {
+    //     return sendError(
+    //       res,
+    //       "dateOfBirth must be a valid date",
+    //       "BAD_REQUEST",
+    //       null,
+    //       400,
+    //     );
+    //   }
+    // }
+
+    // 3. Duplicate phone number check
     if (phone && phone.trim() !== "") {
       const trimmedPhone = phone.trim();
 
@@ -390,7 +461,6 @@ export const updateUserProfile = async (
         where: {
           phone: trimmedPhone,
           id: { not: userId },
-          // Exclude users with empty/null phone numbers
           NOT: {
             OR: [{ phone: null }, { phone: "" }],
           },
@@ -408,43 +478,143 @@ export const updateUserProfile = async (
       }
     }
 
-    // 5. Prepare update data
+    // 4. Duplicate NIN check (for citizens)
+    if (nin && nin.trim() !== "") {
+      const trimmedNin = nin.trim();
+
+      const duplicateNin = await prisma.user.findFirst({
+        where: {
+          nin: trimmedNin,
+          id: { not: userId },
+          NOT: {
+            OR: [{ nin: null }, { nin: "" }],
+          },
+        },
+      });
+
+      if (duplicateNin) {
+        return sendError(
+          res,
+          "This NIN is already registered to another account",
+          "CONFLICT",
+          null,
+          409,
+        );
+      }
+    }
+
+    // 5. Duplicate CAC check (for businesses)
+    if (cacNumber && cacNumber.trim() !== "") {
+      const trimmedCac = cacNumber.trim();
+
+      const duplicateCac = await prisma.user.findFirst({
+        where: {
+          cacNumber: trimmedCac,
+          id: { not: userId },
+          NOT: {
+            OR: [{ cacNumber: null }, { cacNumber: "" }],
+          },
+        },
+      });
+
+      if (duplicateCac) {
+        return sendError(
+          res,
+          "This CAC registration number is already registered to another account",
+          "CONFLICT",
+          null,
+          409,
+        );
+      }
+    }
+
+    // 6. Prepare update data
     const updateData: any = {};
 
-    // Text fields - only include if provided
-    if (firstName !== undefined) {
-      updateData.firstName = firstName.trim();
-    }
-    if (lastName !== undefined) {
-      updateData.lastName = lastName.trim();
-    }
+    // Helper function to add string fields if provided
+    const addStringField = (key: string, value: any, trim: boolean = true) => {
+      if (value !== undefined) {
+        updateData[key] = value && trim ? value.trim() : value;
+      }
+    };
+
+    // Helper function to add boolean fields if provided
+    const addBooleanField = (key: string, value: any) => {
+      if (value !== undefined) {
+        updateData[key] = value;
+      }
+    };
+
+    // Add all string fields
+    addStringField("firstName", firstName);
+    addStringField("lastName", lastName);
+    
+    // Handle phone specially (can be null)
     if (phone !== undefined) {
-      // If phone is empty string or null, set to null instead of empty string
       updateData.phone = phone.trim() !== "" ? phone.trim() : null;
     }
+    
+    // Email is usually not updated here, but include if provided
+    addStringField("email", email);
+    
+    addStringField("address", address);
+    addStringField("town", town);
+    addStringField("dateOfBirth", dateOfBirth);
+    // addStringField("ward", ward);
+    addStringField("gender", gender);
+    addStringField("emergencyContact", emergencyContact);
+    addStringField("avatarUrl", avatarUrl);
+    addStringField("passportPhoto", passportPhoto);
+    
+    // Citizen fields
+    addStringField("occupation", occupation);
+    addStringField("identificationType", identificationType);
+    addStringField("identificationNumber", identificationNumber);
+    addStringField("nin", nin);
+    
+    // Business fields
+    addStringField("businessName", businessName);
+    addStringField("businessType", businessType);
+    addStringField("cacNumber", cacNumber);
+    addStringField("taxIdNumber", taxIdNumber);
+    addStringField("ownerRepresentative", ownerRepresentative);
+    
+    // Date field
+    // if (dateOfBirth !== undefined) {
+    //   updateData.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
+    // }
+    
+    // Boolean fields
+    addBooleanField("onboardingCompleted", onboardingCompleted);
+    addBooleanField("notifyByEmail", notifyByEmail);
+    addBooleanField("notifyBySms", notifyBySms);
+    addBooleanField("notifyByInApp", notifyByInApp);
 
-    // Boolean fields - only include if provided
-    if (notifyByEmail !== undefined) {
-      updateData.notifyByEmail = notifyByEmail;
-    }
-    if (notifyBySms !== undefined) {
-      updateData.notifyBySms = notifyBySms;
-    }
-    if (notifyByInApp !== undefined) {
-      updateData.notifyByInApp = notifyByInApp;
-    }
-
-    // 6. Update user record
+    // 7. Update user record
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: updateData,
+      include: {
+        // ward: true,
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
     });
 
-    // 7. Respond with the clean updated model profile
+    // 8. Remove sensitive fields before sending response
+    const { password, ...userWithoutPassword } = updatedUser;
+
+    // 9. Respond with the clean updated model profile
     return sendSuccess(
       res,
-      updatedUser,
-      "Settings and profile updated successfully",
+      userWithoutPassword,
+      "Profile updated successfully",
     );
   } catch (err) {
     next(err);
@@ -501,7 +671,7 @@ export const forgotPassword = async (
       },
     });
 
-    const resetLink = `${process.env.PAYSTACK_CALLBACK_URL}/reset-password?token=${rawToken}`; // TODO: confirm your frontend route
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}`; // TODO: confirm your frontend route
 
     try {
       await notify({
@@ -699,12 +869,15 @@ export const changePassword = async (
       },
     });
 
-        const newToken = generateAccessToken({
+    const newToken = generateAccessToken({
       id: userId,
       role: req.user!.role,
       email: req.user!.email,
       wardId: req.user!.wardId,
-      tokenVersion: (await prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true } }))!.tokenVersion,
+      tokenVersion: (await prisma.user.findUnique({
+        where: { id: userId },
+        select: { tokenVersion: true },
+      }))!.tokenVersion,
     });
 
     await prisma.auditLog.create({
@@ -733,7 +906,166 @@ export const changePassword = async (
       );
     }
 
-    return sendSuccess(res, { message: "Password changed successfully",accessToken: newToken, });
+    return sendSuccess(res, {
+      message: "Password changed successfully",
+      accessToken: newToken,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyEmail = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { token } = req.query;
+
+    if (!token || typeof token !== "string") {
+      return sendError(
+        res,
+        "Invalid verification link",
+        "INVALID_TOKEN",
+        null,
+        400,
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: {
+        emailVerificationToken: token,
+      },
+    });
+
+    if (!user) {
+      return sendError(
+        res,
+        "Invalid or expired verification link",
+        "INVALID_TOKEN",
+        null,
+        400,
+      );
+    }
+
+    if (
+      user.emailVerificationTokenExpiresAt &&
+      user.emailVerificationTokenExpiresAt < new Date()
+    ) {
+      return sendError(
+        res,
+        "Verification link has expired",
+        "TOKEN_EXPIRED",
+        null,
+        400,
+      );
+    }
+
+    if (user.emailVerifiedAt) {
+      return sendSuccess(res, {
+        message: "Email already verified",
+      });
+    }
+
+    await prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        emailVerifiedAt: new Date(),
+        emailVerificationToken: null,
+        emailVerificationTokenExpiresAt: null,
+      },
+    });
+
+    return sendSuccess(res, {
+      message: "Email verified successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resendVerificationEmail = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { email } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    // Don't reveal whether the email exists.
+    if (!user) {
+      return sendSuccess(res, {
+        message:
+          "If an account exists with this email, a verification link has been sent.",
+      });
+    }
+
+    // Already verified
+    if (user.emailVerifiedAt) {
+      return sendSuccess(res, {
+        message: "This email address has already been verified.",
+      });
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+
+    const verificationExpiresAt = new Date(
+      Date.now() + 30 * 60 * 1000,
+    );
+
+    await prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        emailVerificationToken: verificationToken,
+        emailVerificationTokenExpiresAt: verificationExpiresAt,
+      },
+    });
+
+    const verificationLink =
+      `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+
+    try {
+      await notify({
+        userId: user.id,
+        to: {
+          email: user.email,
+        },
+        templateKey: "account.resendVerificationEmail",
+        vars: {
+          applicant_name: `${user.firstName} ${user.lastName}`,
+          verification_link: verificationLink,
+          expiration_time: "30 minutes",
+        },
+        channels: ["email"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[resendVerificationEmail] notify() failed:",
+        notifyErr,
+      );
+
+      return sendError(
+        res,
+        "Unable to send verification email. Please try again later.",
+        "EMAIL_SEND_FAILED",
+        null,
+        500,
+      );
+    }
+
+    return sendSuccess(res, {
+      message:
+        "If an account exists with this email, a verification link has been sent.",
+    });
   } catch (err) {
     next(err);
   }

@@ -49,10 +49,10 @@ export const initializePaystackPayment = async (
         400,
       );
     }
-
+    
     const reference = generateReference("PAY");
     const amountKobo = Math.round(Number(invoice.amount) * 100);
-
+    
     const gatewayResult = await initializeTransaction({
       email: userEmail,
       amountKobo,
@@ -64,7 +64,8 @@ export const initializePaystackPayment = async (
         userId,
       },
     });
-
+    
+    console.log("✅ 1",gatewayResult,userEmail)
     if (!gatewayResult.success) {
       return sendError(
         res,
@@ -75,6 +76,7 @@ export const initializePaystackPayment = async (
       );
     }
 
+    console.log("❤️ 2")
     // Create a pending Payment row now so verify/webhook have something to match against by reference.
     await prisma.payment.create({
       data: {

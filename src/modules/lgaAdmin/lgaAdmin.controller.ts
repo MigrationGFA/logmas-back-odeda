@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { prisma } from "../../utils/prisma";
 import { sendSuccess, sendError } from "../../utils/response";
-import {  Role } from "@prisma/client";
+import { Role } from "@prisma/client";
 import { getIp, queryString } from "../complaints/complaints.controller";
 import { notify } from "../notification/notification.service";
 
@@ -68,7 +68,6 @@ export const listWards = async (
         take: limit,
         // where: { deletedAt: null },
         include: {
-     
           _count: {
             select: {
               complaints: true,
@@ -78,7 +77,7 @@ export const listWards = async (
         },
         orderBy: { name: "asc" },
       }),
-      prisma.ward.count({ where: { } }),
+      prisma.ward.count({ where: {} }),
     ]);
 
     // Format output payload array to match what your UI layout table expects
@@ -222,7 +221,7 @@ export const assignCouncillor = async (
     // Unassign councillor from any previous ward then assign to new one
     await prisma.user.update({
       where: { id: councillorId },
-      data: {updatedAt: new Date() },
+      data: { updatedAt: new Date() },
     });
 
     await prisma.auditLog.create({
@@ -310,8 +309,7 @@ export const createStaff = async (
 ) => {
   try {
     const adminId = req.user!.id;
-    const { email, firstName, lastName, phone, role, wardId, contractorId } =
-      req.body;
+    const { email, firstName, lastName, phone, role } = req.body;
 
     const allowedRoles: Role[] = [
       "ward_councillor",
@@ -339,11 +337,11 @@ export const createStaff = async (
       return sendError(res, "Email already registered", "CONFLICT", null, 409);
 
     // Validate ward exists if provided
-    if (wardId) {
-      const ward = await prisma.ward.findUnique({ where: { id: wardId } });
-      if (!ward)
-        return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
-    }
+    // if (wardId) {
+    //   const ward = await prisma.ward.findUnique({ where: { id: wardId } });
+    //   if (!ward)
+    //     return sendError(res, "Ward not found", "NOT_FOUND", null, 404);
+    // }
 
     // 1. Generate the unique random temporary password per execution call
     const uniqueTempPassword = generateTempPassword(12);
@@ -365,9 +363,9 @@ export const createStaff = async (
         createdById: adminId,
         role: role as Role,
         // Match the specific schema properties for WC vs FO
-        ...(wardId && isWardCouncillor && { assignedWardId: wardId }),
-        ...(wardId &&
-          (isFieldOfficer || isWardCouncillor) && { wardId: wardId }),
+        // ...(wardId && isWardCouncillor && { assignedWardId: wardId }),
+        // ...(wardId &&
+        //   (isFieldOfficer || isWardCouncillor) && { wardId: wardId }),
         // ...(contractorId && { contractorId }),
       },
       select: {
@@ -377,8 +375,8 @@ export const createStaff = async (
         lastName: true,
         role: true,
         phone: true,
-        wardId: true,
-        assignedWardId: true,
+        // wardId: true,
+        // assignedWardId: true,
         // contractorId: true,
         isActive: true,
         createdAt: true,
@@ -392,7 +390,7 @@ export const createStaff = async (
         entity: "User",
         entityId: staff.id,
         userId: adminId,
-        details: { role, email, wardId, contractorId },
+        details: { role, email },
         ipAddress: getIp(req),
       },
     });
@@ -995,6 +993,8 @@ export const getAccountsOverview = async (
             role: true,
             isActive: true,
             passwordResetRequired: true,
+            emailVerifiedAt: true,
+            avatarUrl: true,
             lastLoginAt: true,
             createdAt: true,
             suspendedAt: true,
@@ -1002,7 +1002,6 @@ export const getAccountsOverview = async (
             // Ward link — for councillors this is their assignedWard
             // For others it's their home ward
             ward: { select: { id: true, name: true } },
-        
           },
           orderBy: { createdAt: "desc" },
         }),
@@ -1016,12 +1015,13 @@ export const getAccountsOverview = async (
       phone: u.phone ?? "—",
       role: u.role,
       ward: u.ward?.name ?? null,
-      status: u.passwordResetRequired
-        ? "pending_reset"
-        : u.isActive
+      avatarUrl: u.avatarUrl,
+      emailVerified: u.emailVerifiedAt !== null,
+      status: u.isActive
           ? "active"
           : "suspended",
-      lastLogin: u.lastLoginAt?.toISOString() ?? null,
+      isReset:  u.passwordResetRequired,
+      lastLogin: u.lastLoginAt ?? null,
       createdAt: u.createdAt.toISOString().split("T")[0],
       suspendedAt: u.suspendedAt?.toISOString() ?? null,
       suspensionReason: u.suspensionReason ?? null,
@@ -1070,11 +1070,11 @@ export const resetAccountPassword = async (
         firstName: true,
         lastName: true,
         role: true,
-        deletedAt: true,
+        // deletedAt: true,
       },
     });
 
-    if (!target || target.deletedAt) {
+    if (!target) {
       return sendError(res, "Account not found", "NOT_FOUND", null, 404);
     }
 
@@ -1158,4 +1158,3 @@ export const resetAccountPassword = async (
     next(err);
   }
 };
-

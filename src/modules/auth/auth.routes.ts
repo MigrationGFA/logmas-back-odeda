@@ -1,6 +1,6 @@
 // auth.routes.ts
 import { Router } from 'express';
-import { login, register, getMe, googleLogin, refreshToken, updateUserProfile, forgotPassword, resetPassword, changePassword } from './auth.controller';
+import { login, register, getMe, googleLogin, refreshToken, updateUserProfile, forgotPassword, resetPassword, changePassword, verifyEmail, resendVerificationEmail } from './auth.controller';
 import { validateBody } from '../../middleware/validate.middleware';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { registerSchema, loginSchema, googleAuthSchema } from './auth.validation';
@@ -409,6 +409,12 @@ router.post('/refresh', refreshToken);
 router.patch('/update/profile/:id',requireAuth,authLimiter, updateUserProfile);
 
 router.post('/forgot-password', forgotPassword);
+router.get('/verify-email', verifyEmail);
+router.post(
+  "/resend-verification",
+  authLimiter,
+  resendVerificationEmail,
+);
 router.post('/reset-password', resetPassword);
 // router.patch('/change-password',requireAuth, changePassword);
 router.patch('/change-password',requireAuth,authLimiter, changePassword);

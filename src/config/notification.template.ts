@@ -563,12 +563,11 @@ export const accountTemplates = {
 </html>`,
   },
 
-  
-accountReactivated: {
-  sms: `Hello {{applicant_name}}, your Ijebu North East portal account has been reactivated. You can now log in as usual.`,
+  accountReactivated: {
+    sms: `Hello {{applicant_name}}, your Ijebu North East portal account has been reactivated. You can now log in as usual.`,
 
-  emailSubject: `Your Account Has Been Reactivated`,
-  emailHtml: `
+    emailSubject: `Your Account Has Been Reactivated`,
+    emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
@@ -579,13 +578,13 @@ accountReactivated: {
   </div>
 </body>
 </html>`,
-},
+  },
 
-passwordResetByAdmin: {
-  sms: `Hello {{applicant_name}}, your LOGMAS password was reset by an administrator. Temporary password: {{temp_password}}. You must change it on next login.`,
+  passwordResetByAdmin: {
+    sms: `Hello {{applicant_name}}, your LOGMAS password was reset by an administrator. Temporary password: {{temp_password}}. You must change it on next login.`,
 
-  emailSubject: `Your Password Was Reset`,
-  emailHtml: `
+    emailSubject: `Your Password Was Reset`,
+    emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
@@ -603,7 +602,7 @@ passwordResetByAdmin: {
   </div>
 </body>
 </html>`,
-},
+  },
 
   // Welcome — new staff account created
   welcomeStaff: {
@@ -633,6 +632,122 @@ passwordResetByAdmin: {
 </body>
 </html>`,
   },
+
+  verifyEmail: {
+    emailSubject: `Verify your LOGMAS account`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
+    
+    <div style="background: #1a4731; padding: 32px; text-align: center;">
+      <h1 style="color: #fff; margin: 0;">Welcome to LOGMAS</h1>
+      <p style="color: #a7f3d0; margin: 4px 0 0;">
+        Local Government Management System
+      </p>
+    </div>
+
+    <div style="padding: 32px;">
+      <p>Dear <strong>{{applicant_name}}</strong>,</p>
+
+      <p>
+        Thank you for creating your LOGMAS account.
+        Please verify your email address to complete your registration.
+      </p>
+
+      <div style="text-align: center; margin: 32px 0;">
+        <a
+          href="{{verification_link}}"
+          target="_blank"
+          style="
+            display: inline-block;
+            background: #1a4731;
+            color: #fff;
+            text-decoration: none;
+            padding: 14px 32px;
+            border-radius: 6px;
+            font-weight: bold;
+          "
+        >
+          Verify Email Address →
+        </a>
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        This verification link will expire in {{expiration_time}}.
+      </p>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        If you did not create this account, you can safely ignore this email.
+      </p>
+    </div>
+
+  </div>
+</body>
+</html>`,
+  },
+  resendVerificationEmail: {
+  emailSubject: `New Email Verification Link — LOGMAS`,
+  emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
+
+    <div style="background: #1a4731; padding: 32px; text-align: center;">
+      <h1 style="color: #fff; margin: 0;">LOGMAS</h1>
+      <p style="color: #a7f3d0; margin: 4px 0 0;">
+        Local Government Management System
+      </p>
+    </div>
+
+    <div style="padding: 32px;">
+      <p>Dear <strong>{{applicant_name}}</strong>,</p>
+
+      <p>
+        You requested a new email verification link for your LOGMAS account.
+        Click the button below to verify your email address.
+      </p>
+
+      <div style="text-align: center; margin: 32px 0;">
+        <a
+          href="{{verification_link}}"
+          style="
+            display: inline-block;
+            background: #1a4731;
+            color: #fff;
+            text-decoration: none;
+            padding: 14px 32px;
+            border-radius: 6px;
+            font-weight: bold;
+          "
+        >
+          Verify My Email →
+        </a>
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        This new verification link will expire in
+        <strong>{{expiration_time}}</strong>.
+      </p>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        If you did not request a new verification link, you can safely
+        ignore this email.
+      </p>
+
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+
+      <p style="font-size: 12px; color: #6b7280;">
+        For your security, do not share this verification link with anyone.
+      </p>
+    </div>
+
+  </div>
+</body>
+</html>`,
+},
 };
 
 // ============================================================

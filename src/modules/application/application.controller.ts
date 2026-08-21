@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
-import multer from 'multer';
+import multer from "multer";
 import { sendSuccess, sendError } from "../../utils/response";
 import * as ApplicationService from "./application.service";
 import { createApplicationSchema } from "./application.validation";
 import { prisma } from "../../utils/prisma";
+import { notify } from "../notification/notification.service";
 
 export const createApplication = async (
   req: Request,
@@ -498,6 +499,11 @@ export const adminApproveApplication = async (
 
     const app = await prisma.application.findUnique({
       where: { id: String(id) },
+      include: {
+        applicant: true,
+        service: true,
+        invoice: true,
+      },
     });
     if (!app)
       return sendError(res, "Application not found", "NOT_FOUND", null, 404);
@@ -529,6 +535,36 @@ export const adminApproveApplication = async (
         ipAddress: req.ip,
       },
     });
+
+    try {
+      const fullName = `${app.applicant.firstName} ${app.applicant.lastName}`;
+      await notify({
+        userId: app.applicant.id,
+        to: {
+          email: app.applicant.email,
+          phone: app.applicant.phone ?? "",
+        },
+        templateKey: "application.applicationApproved",
+        vars: {
+          applicant_name: fullName,
+          application_number: app.applicationNumber,
+          service_name: app.service.name,
+          application_id: app.id,
+          // reviewer_name: app.reviewedBy ? `${app.reviewedBy.firstName} ${app.reviewedBy.lastName}` : 'Admin',
+          reviewed_at: new Date().toISOString(),
+          fee_amount: app.feeAmount.toString(),
+          invoice_number: app.invoice.invoiceNumber,
+          invoice_amount: app.invoice.amount.toString(),
+          invoice_status: app.invoice.paymentStatus,
+        },
+        channels: ["email", "sms"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[resetAccountPassword] notify() failed, continuing anyway:",
+        notifyErr,
+      );
+    }
 
     return sendSuccess(res, updated, "Application approved");
   } catch (err) {
@@ -562,6 +598,11 @@ export const adminDeclineApplication = async (
 
     const app = await prisma.application.findUnique({
       where: { id: String(id) },
+       include: {
+        applicant: true,
+        service: true,
+        invoice: true,
+      },
     });
     if (!app)
       return sendError(res, "Application not found", "NOT_FOUND", null, 404);
@@ -594,6 +635,34 @@ export const adminDeclineApplication = async (
         ipAddress: req.ip,
       },
     });
+
+     try {
+      const fullName = `${app.applicant.firstName} ${app.applicant.lastName}`;
+     await notify({
+          userId: app.applicant.id,
+          to: { 
+            email: app.applicant.email, 
+            phone: app.applicant.phone ?? "" 
+          },
+          templateKey: "application.applicationDeclined",
+          vars: {
+            applicant_name: fullName,
+            application_number: app.applicationNumber,
+            service_name: app.service.name,
+            application_id: app.id,
+            service_id: app.serviceId,
+            // reviewer_name: app.reviewedBy ? `${app.reviewedBy.firstName} ${app.reviewedBy.lastName}` : 'Admin',
+            reviewed_at: new Date().toISOString(),
+            decline_reason: declineReason,
+          },
+          channels: ["email", "sms"],
+        });
+    } catch (notifyErr) {
+      console.error(
+          "[adminDeclineApplication] notify() failed, continuing anyway:",
+          notifyErr,
+        );
+    }
 
     return sendSuccess(res, updated, "Application declined");
   } catch (err) {

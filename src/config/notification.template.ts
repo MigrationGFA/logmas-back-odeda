@@ -15,383 +15,176 @@ export const interpolate = (
   );
 };
 
-const BASE_URL = process.env.APP_URL ?? "https://ijebunortheastlga.gov.ng";
+const BASE_URL = process.env.FRONTEND_URL;
 
-// ============================================================
-// 1. STATE OF ORIGIN (SOO)
-// ============================================================
-
-export const sooTemplates = {
-  // Stage 1 — Invoice Generated / Payment Pending
-  invoiceGenerated: {
-    sms: `Hello {{applicant_name}}, your Ijebu North East SOO application (#{{application_id}}) has been received. Please pay the processing fee of {{payment_amount}} to initiate review: {{checkout_link}}`,
-
-    emailSubject: `Action Required: Processing Fee for SOO Application #{{application_id}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 0; background: #f5f5f5; }
-    .container { max-width: 600px; margin: 32px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .header { background: #1a4731; padding: 24px 32px; text-align: center; }
-    .header h1 { color: #fff; margin: 0; font-size: 20px; }
-    .header p { color: #a7f3d0; margin: 4px 0 0; font-size: 13px; }
-    .body { padding: 32px; }
-    .amount-box { background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0; }
-    .amount-box .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
-    .amount-box .amount { font-size: 32px; font-weight: bold; color: #15803d; }
-    .btn { display: inline-block; background: #15803d; color: #fff !important; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold; margin: 16px 0; }
-    .footer { background: #f9fafb; padding: 16px 32px; text-align: center; font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; }
-    .ref { font-family: monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Ijebu North East LGA</h1>
-      <p>State of Origin — Application Portal</p>
-    </div>
-    <div class="body">
-      <p>Dear <strong>{{applicant_name}}</strong>,</p>
-      <p>Thank you for submitting your State of Origin application. Your application details have been securely recorded.</p>
-      <p>Application Reference: <span class="ref">#{{application_id}}</span></p>
-      <div class="amount-box">
-        <div class="label">Processing Fee Due</div>
-        <div class="amount">{{payment_amount}}</div>
-      </div>
-      <p>To initiate the heritage verification process, kindly complete payment of the processing fee using the secure link below:</p>
-      <div style="text-align: center;">
-        <a href="{{checkout_link}}" class="btn">Pay Processing Fee</a>
-      </div>
-      <p style="font-size: 13px; color: #6b7280;">Your application will remain pending until payment is confirmed. The processing fee covers administrative and ancestral verification costs.</p>
-    </div>
-    <div class="footer">
-      <p>Ijebu North East Local Government Area, Ogun State, Nigeria</p>
-      <p>This is an automated message. Do not reply to this email.</p>
-    </div>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 2 — Payment Received (Citizen)
-  paymentReceived: {
-    sms: `Receipt: Payment of {{payment_amount}} for your Ijebu North East SOO certificate (#{{application_id}}) was successful. Your application is now queued for secretariat review.`,
-
-    emailSubject: `Payment Received — SOO Application #{{application_id}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 0; background: #f5f5f5; }
-    .container { max-width: 600px; margin: 32px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .header { background: #1a4731; padding: 24px 32px; text-align: center; }
-    .header h1 { color: #fff; margin: 0; font-size: 20px; }
-    .body { padding: 32px; }
-    .receipt-box { background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 20px; margin: 24px 0; }
-    .receipt-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #d1fae5; font-size: 14px; }
-    .receipt-row:last-child { border-bottom: none; font-weight: bold; }
-    .timeline { margin: 24px 0; padding: 0; list-style: none; }
-    .timeline li { padding: 8px 0 8px 20px; border-left: 2px solid #86efac; margin-left: 8px; font-size: 14px; color: #374151; position: relative; }
-    .timeline li::before { content: ""; position: absolute; left: -5px; top: 12px; width: 8px; height: 8px; background: #15803d; border-radius: 50%; }
-    .footer { background: #f9fafb; padding: 16px 32px; text-align: center; font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>✓ Payment Confirmed</h1>
-    </div>
-    <div class="body">
-      <p>Dear <strong>{{applicant_name}}</strong>,</p>
-      <p>We have successfully received your payment. Your application is now queued for review.</p>
-      <div class="receipt-box">
-        <div class="receipt-row"><span>Invoice Number</span><span>{{invoice_number}}</span></div>
-        <div class="receipt-row"><span>Application ID</span><span>#{{application_id}}</span></div>
-        <div class="receipt-row"><span>Amount Paid</span><span>{{payment_amount}}</span></div>
-        <div class="receipt-row"><span>Status</span><span>✓ Confirmed</span></div>
-      </div>
-      <p><strong>What happens next?</strong></p>
-      <ul class="timeline">
-        <li>Secretariat document audit (24 hours)</li>
-        <li>Ward ancestry validation by your councillor (48–72 hours)</li>
-        <li>Certificate generation and delivery</li>
-      </ul>
-      <p style="font-size: 13px; color: #6b7280;">You will receive email and SMS updates at each stage. Expected completion: 48–72 hours.</p>
-    </div>
-    <div class="footer">
-      <p>Ijebu North East Local Government Area, Ogun State, Nigeria</p>
-    </div>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 2 — LGA Desk Alert (internal)
-  lgaDeskAlert: {
-    emailSubject: `[ACTION REQUIRED] New Paid SOO Application: #{{application_id}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-left: 4px solid #f59e0b;">
-    <h2 style="color: #92400e;">⚡ New Paid Application Requires Triage</h2>
-    <p>A new paid State of Origin application has been submitted and requires immediate secretariat review.</p>
-    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
-      <tr><td style="padding: 8px; color: #6b7280;">Applicant</td><td style="padding: 8px; font-weight: bold;">{{applicant_name}}</td></tr>
-      <tr style="background: #f9fafb;"><td style="padding: 8px; color: #6b7280;">Application ID</td><td style="padding: 8px; font-family: monospace;">#{{application_id}}</td></tr>
-      <tr><td style="padding: 8px; color: #6b7280;">Ward</td><td style="padding: 8px;">{{ward_name}}</td></tr>
-      <tr style="background: #f9fafb;"><td style="padding: 8px; color: #6b7280;">Amount Paid</td><td style="padding: 8px; font-weight: bold; color: #15803d;">{{payment_amount}}</td></tr>
-    </table>
-    <a href="${BASE_URL}/dashboard/applications" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">Open Admin Queue →</a>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 3 — Forwarded to Councillor
-  forwardedToCouncillor: {
-    sms_citizen: `Update: Your Ijebu North East SOO application (#{{application_id}}) has passed central review and has been routed to the {{ward_name}} desk for validation.`,
-    sms_councillor: `LGA Alert: Hon. {{councillor_name}}, a new State of Origin verification request for {{applicant_name}} has been routed to your signature desk. Log in to review: ${BASE_URL}/dashboard/applications`,
-
-    emailSubject: `Application Update: Verification routed to {{ward_name}} Desk`,
+export const applicationTemplates = {
+  // Application Submitted - Initial Confirmation
+  applicationSubmitted: {
+    emailSubject: `Application Submitted: #{{application_number}} - {{service_name}}`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px;">
-    <div style="background: #1a4731; padding: 20px; border-radius: 8px 8px 0 0; margin: -32px -32px 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0; font-size: 20px;">Application Update</h1>
+    <h2>Application Received</h2>
+    <p>Dear {{applicant_name}},</p>
+    <p>Your application for <strong>{{service_name}}</strong> has been successfully submitted and is now under review.</p>
+    <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Application Number:</span> <strong style="font-family: monospace;">{{application_number}}</strong></div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Service:</span> {{service_name}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Amount:</span> ₦{{fee_amount}}</div>
+      <div><span style="color: #6b7280;">Status:</span> <span style="color: #f59e0b; font-weight: bold;">Under Review</span></div>
     </div>
-    <p>Dear <strong>{{applicant_name}}</strong>,</p>
-    <p>Great news! Your State of Origin application has cleared central secretariat review and has been routed to the next stage.</p>
-    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 0; font-size: 14px;">Your application <strong>#{{application_id}}</strong> has been forwarded to <strong>Hon. {{councillor_name}}</strong> of the <strong>{{ward_name}}</strong> desk for ancestral lineage validation.</p>
-    </div>
-    <p style="font-size: 14px; color: #6b7280;">This stage involves verification of ancestral and residency records within the ward. You will be notified immediately once the councillor completes their review.</p>
+    <p style="font-size: 13px; color: #6b7280;">You will be notified once a decision has been made on your application.</p>
+    <a href="${BASE_URL}/dashboard/applications/{{application_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">Track Application →</a>
   </div>
 </body>
 </html>`,
   },
 
-  // Stage 4 — Rejected
-  rejected: {
-    sms: `Attention {{applicant_name}}, your Ijebu North East SOO application requires update. Reason: {{rejection_reason}}. Please log in to your dashboard to edit and re-submit: ${BASE_URL}/dashboard`,
+  // Application Approved
+  applicationApproved: {
+    emailSubject: `Application Approved: #{{application_number}} - {{service_name}}`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #10b981;">
+    <h2 style="color: #065f46;">✓ Application Approved</h2>
+    <p>Dear {{applicant_name}},</p>
+    <p>We are pleased to inform you that your application for <strong>{{service_name}}</strong> has been <strong style="color: #10b981;">approved</strong>.</p>
+    <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Application Number:</span> <strong style="font-family: monospace;">{{application_number}}</strong></div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Service:</span> {{service_name}}</div>
+      // <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed By:</span> {{reviewer_name}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed At:</span> {{reviewed_at}}</div>
+      <div><span style="color: #6b7280;">Status:</span> <span style="color: #10b981; font-weight: bold;">Approved</span></div>
+    </div>
+    {{#if certificate}}
+    <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 0; font-size: 13px; color: #92400e;">
+        <strong>Certificate Information:</strong><br>
+        Certificate Number: {{certificate.certificate_number}}<br>
+        Verification Code: {{certificate.verification_code}}
+      </p>
+    </div>
+    {{/if}}
+    {{#if invoice}}
+    <div style="background: #eff6ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 0 0 4px; font-size: 13px; color: #6b7280;">Payment Details</p>
+      <p style="margin: 0; font-size: 14px;">
+        <strong>Amount Due:</strong> ₦{{invoice.amount}}<br>
+        <strong>Invoice Number:</strong> {{invoice.invoice_number}}<br>
+        <strong>Status:</strong> {{invoice.payment_status}}
+      </p>
+    </div>
+    {{/if}}
+    <p style="font-size: 13px; color: #6b7280;">Please proceed with payment to receive your certificate/license.</p>
+    <a href="${BASE_URL}/dashboard/applications/{{application_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">View Application →</a>
+  </div>
+</body>
+</html>`,
+  },
 
-    emailSubject: `Action Required: SOO Application Update #{{application_id}}`,
+  // Application Declined
+  applicationDeclined: {
+    emailSubject: `Application Update: #{{application_number}} - {{service_name}}`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #ef4444;">
-    <h2>Application Update Required</h2>
-    <p>Dear <strong>{{applicant_name}}</strong>,</p>
-    <p>Our verification team was unable to authenticate the ancestry or residency details in your application <strong>#{{application_id}}</strong>.</p>
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 0; font-size: 14px; color: #7f1d1d;"><strong>Reason for update required:</strong><br>{{rejection_reason}}</p>
+    <h2 style="color: #991b1b;">Application Declined</h2>
+    <p>Dear {{applicant_name}},</p>
+    <p>We regret to inform you that your application for <strong>{{service_name}}</strong> has been <strong style="color: #ef4444;">declined</strong>.</p>
+    <div style="background: #fef2f2; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Application Number:</span> <strong style="font-family: monospace;">{{application_number}}</strong></div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Service:</span> {{service_name}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed By:</span> {{reviewer_name}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed At:</span> {{reviewed_at}}</div>
+      <div><span style="color: #6b7280;">Status:</span> <span style="color: #ef4444; font-weight: bold;">Declined</span></div>
     </div>
-    <p>You may edit and re-submit your application at no additional charge. Please log in to your dashboard and update the flagged details.</p>
-    <a href="${BASE_URL}/dashboard/applications" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; margin-top: 8px;">Update Application →</a>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 5 — Certificate Issued
-  certificateIssued: {
-    sms: `Congratulations {{applicant_name}}! Your Ijebu North East State of Origin Certificate has been officially issued. Download your secure copy here: {{download_link}}`,
-
-    emailSubject: `Your Official Certificate of State of Origin is Ready!`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
-    <div style="background: linear-gradient(135deg, #1a4731, #15803d); padding: 40px; text-align: center;">
-      <h1 style="color: #fff; margin: 0 0 8px; font-size: 24px;">🎉 Certificate Ready!</h1>
-      <p style="color: #a7f3d0; margin: 0;">Ijebu North East Local Government Area</p>
+    {{#if decline_reason}}
+    <div style="background: #fff7ed; border-left: 4px solid #f97316; padding: 16px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+      <p style="margin: 0 0 4px; font-size: 12px; color: #6b7280; text-transform: uppercase;">Reason for Decline</p>
+      <p style="margin: 0; font-size: 14px;">{{decline_reason}}</p>
     </div>
-    <div style="padding: 32px;">
-      <p>Dear <strong>{{applicant_name}}</strong>,</p>
-      <p>Congratulations! Your State of Origin certificate has been officially issued and digitally signed by the Ijebu North East Local Government Authority.</p>
-      <div style="text-align: center; margin: 32px 0;">
-        <a href="{{download_link}}" style="display: inline-block; background: #15803d; color: #fff; text-decoration: none; padding: 16px 40px; border-radius: 6px; font-weight: bold; font-size: 16px;">Download Certificate →</a>
-      </div>
-      <div style="background: #f9fafb; border-radius: 8px; padding: 16px; font-size: 13px; color: #6b7280;">
-        <p style="margin: 0 0 8px;"><strong>Important notes:</strong></p>
-        <ul style="margin: 0; padding-left: 16px;">
-          <li>Your certificate contains a secure QR code for instant verification</li>
-          <li>Print on A4 paper for official submissions</li>
-          <li>Verify authenticity at: ${BASE_URL}/verify</li>
-        </ul>
-      </div>
+    {{/if}}
+    <p style="font-size: 13px; color: #6b7280;">If you have any questions or would like to reapply, please contact our support team.</p>
+    <div style="margin-top: 20px;">
+      <a href="${BASE_URL}/dashboard/applications/{{application_id}}" style="display: inline-block; background: #6b7280; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; margin-right: 12px;">View Details</a>
+      <a href="${BASE_URL}/services/{{service_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">Reapply</a>
     </div>
   </div>
 </body>
 </html>`,
   },
-};
 
-// ============================================================
-// 2. TRADE PERMITS & LEVIES
-// ============================================================
 
-export const permitTemplates = {
-  // Stage 1 — Invoice Generated
+  // Invoice Generated
   invoiceGenerated: {
-    sms: `Hello, your Trade Permit fee of {{payment_amount}} for {{business_name}} is pending. Securely pay online to start review: {{checkout_link}}`,
-
-    emailSubject: `Invoice Generated: Trade Permit Application for {{business_name}}`,
+    emailSubject: `Invoice Generated: {{invoice_number}} - {{service_name}}`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #1a4731;">
-    <h2>Trade Permit Application — Invoice</h2>
-    <p>Dear Business Owner,</p>
-    <p>Your Trade Permit application for <strong>{{business_name}}</strong> has been received. Please complete payment to begin the review process.</p>
-    <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 20px; margin: 24px 0; text-align: center;">
-      <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Amount Due</div>
-      <div style="font-size: 32px; font-weight: bold; color: #15803d;">{{payment_amount}}</div>
-      <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">{{permit_type}}</div>
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px;">
+    <h2>Invoice Generated</h2>
+    <p>Dear {{applicant_name}},</p>
+    <p>An invoice has been generated for your <strong>{{service_name}}</strong> application.</p>
+    <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Invoice Number:</span> <strong style="font-family: monospace;">{{invoice_number}}</strong></div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Application:</span> {{application_number}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Amount Due:</span> <strong style="color: #1a4731;">₦{{amount}}</strong></div>
+      <div><span style="color: #6b7280;">Status:</span> <span style="color: #f59e0b; font-weight: bold;">Pending Payment</span></div>
     </div>
-    <div style="text-align: center;">
-      <a href="{{checkout_link}}" style="display: inline-block; background: #15803d; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold;">Pay Now →</a>
+    {{#if virtual_account}}
+    <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 0 0 8px; font-size: 13px; color: #92400e; font-weight: bold;">Virtual Account Details</p>
+      <p style="margin: 0; font-size: 14px;">
+        <strong>Bank:</strong> {{virtual_account.bank_name}}<br>
+        <strong>Account Number:</strong> {{virtual_account.account_number}}<br>
+        <strong>Account Name:</strong> {{virtual_account.account_name}}<br>
+        <strong>Reference:</strong> {{virtual_account.reference}}
+      </p>
     </div>
+    {{/if}}
+    <p style="font-size: 13px; color: #6b7280;">Please complete payment to finalize your application.</p>
+    <a href="${BASE_URL}/dashboard/payments/{{invoice_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">Make Payment →</a>
   </div>
 </body>
 </html>`,
   },
 
-  // Stage 2 — Permit Approved
-  permitApproved: {
-    sms: `Success! The Trade Permit for {{business_name}} is approved and active. Check your email to download your official license.`,
-
-    emailSubject: `APPROVED: Your Trade Permit for {{business_name}} is Active`,
+  // Payment Confirmed
+  paymentConfirmed: {
+    emailSubject: `Payment Confirmed: {{invoice_number}} - {{service_name}}`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
-    <div style="background: linear-gradient(135deg, #1a4731, #15803d); padding: 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0;">✓ Permit Approved</h1>
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #10b981;">
+    <h2 style="color: #065f46;">✓ Payment Confirmed</h2>
+    <p>Dear {{applicant_name}},</p>
+    <p>We have received your payment of <strong>₦{{amount}}</strong> for <strong>{{service_name}}</strong>.</p>
+    <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Invoice Number:</span> {{invoice_number}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Amount Paid:</span> ₦{{amount}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Transaction Reference:</span> {{transaction_ref}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Payment Method:</span> {{payment_method}}</div>
+      <div><span style="color: #6b7280;">Status:</span> <span style="color: #10b981; font-weight: bold;">Confirmed</span></div>
     </div>
-    <div style="padding: 32px;">
-      <p>Your <strong>{{permit_type}}</strong> for <strong>{{business_name}}</strong> has been formally approved by the Ijebu North East LGA Secretariat.</p>
-      <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
-        <p style="margin: 0;"><strong>Compliance Reminder:</strong> Your permit must be visibly displayed at your business premises at all times. Failure to display may result in enforcement action.</p>
-      </div>
-      <div style="text-align: center;">
-        <a href="{{download_link}}" style="display: inline-block; background: #15803d; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold;">Download Permit →</a>
-      </div>
+    {{#if receipt}}
+    <div style="background: #eff6ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 0 0 4px; font-size: 13px; color: #6b7280;">Receipt Information</p>
+      <p style="margin: 0; font-size: 14px;">
+        <strong>Receipt Number:</strong> {{receipt.receipt_number}}<br>
+        <strong>Verification Code:</strong> {{receipt.verification_code}}
+      </p>
     </div>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 3 — Permit Rejected
-  permitRejected: {
-    emailSubject: `Attention Needed: Trade Permit Application for {{business_name}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #ef4444;">
-    <h2>Trade Permit — Update Required</h2>
-    <p>Dear Business Owner,</p>
-    <p>The regulatory team has reviewed your <strong>{{permit_type}}</strong> application for <strong>{{business_name}}</strong> and requires amendments before approval can be granted.</p>
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 0; font-size: 14px; color: #7f1d1d;"><strong>Compliance Issue:</strong><br>{{rejection_reason}}</p>
-    </div>
-    <p>Please log in to your dashboard to review and update your application.</p>
-    <a href="${BASE_URL}/dashboard/permits" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">Update Application →</a>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 4 — Levy Assessment
-  levyAssessment: {
-    sms: `Notice: {{levy_name}} is due for {{business_name}}. Settle the {{payment_amount}} fee before {{due_date}} to avoid penalties: {{checkout_link}}`,
-
-    emailSubject: `Notice of Local Government Levy: {{levy_name}} - {{business_name}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #f59e0b;">
-    <h2>📋 Levy Assessment Notice</h2>
-    <p>Dear Business Owner (<strong>{{business_name}}</strong>),</p>
-    <p>This is an official notice of outstanding local government levy assessment for the current period.</p>
-    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 20px 0;">
-      <tr style="background: #f9fafb;"><td style="padding: 10px; color: #6b7280;">Levy Type</td><td style="padding: 10px; font-weight: bold;">{{levy_name}}</td></tr>
-      <tr><td style="padding: 10px; color: #6b7280;">Amount Due</td><td style="padding: 10px; font-weight: bold; color: #b45309;">{{payment_amount}}</td></tr>
-      <tr style="background: #f9fafb;"><td style="padding: 10px; color: #6b7280;">Due Date</td><td style="padding: 10px; font-weight: bold; color: #ef4444;">{{due_date}}</td></tr>
-    </table>
-    <p style="font-size: 13px; color: #6b7280;">Late payments attract penalty surcharges as stipulated in LGA revenue guidelines. Persistent non-compliance may result in business permit suspension.</p>
-    <a href="{{checkout_link}}" style="display: inline-block; background: #15803d; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold; margin-top: 8px;">Pay Levy Now →</a>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 5 — Overdue Warning
-  overdueWarning: {
-    sms: `Urgent: Levy for {{business_name}} is overdue. Please pay {{payment_amount}} immediately to avoid business suspension: {{checkout_link}}`,
-
-    emailSubject: `OVERDUE NOTICE: Surcharge applied to {{business_name}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #ef4444;">
-    <div style="background: #fef2f2; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-      <h2 style="color: #991b1b; margin: 0;">⚠️ OVERDUE PAYMENT NOTICE</h2>
-    </div>
-    <p>Dear Business Owner (<strong>{{business_name}}</strong>),</p>
-    <p>Your <strong>{{levy_name}}</strong> payment of <strong>{{payment_amount}}</strong> has exceeded its due date. Penalty charges are now compounding on the outstanding balance.</p>
-    <p style="color: #991b1b; font-weight: bold;">Continued non-payment may result in:</p>
-    <ul style="color: #7f1d1d; font-size: 14px;">
-      <li>Escalating penalty surcharges</li>
-      <li>Temporary suspension of your trade permit</li>
-      <li>Field enforcement action by LGA officers</li>
-    </ul>
-    <a href="{{checkout_link}}" style="display: inline-block; background: #ef4444; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold; margin-top: 8px;">Pay Now — Avoid Suspension →</a>
-  </div>
-</body>
-</html>`,
-  },
-
-  // Stage 6 — Permit Suspended
-  permitSuspended: {
-    sms: `Urgent: The trade permit for {{business_name}} has been suspended. Reason: {{suspension_reason}}. Contact the LGA Secretariat immediately.`,
-
-    emailSubject: `CRITICAL NOTICE: Suspension of Trade Permit for {{business_name}}`,
-    emailHtml: `
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
-  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #dc2626;">
-    <div style="background: #dc2626; color: #fff; padding: 16px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
-      <h2 style="margin: 0;">🔴 TRADE PERMIT SUSPENDED</h2>
-    </div>
-    <p>Dear Business Owner (<strong>{{business_name}}</strong>),</p>
-    <p>This is an official notice that your <strong>{{permit_type}}</strong> has been administratively suspended effective immediately.</p>
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 0; font-size: 14px;"><strong>Reason for Suspension:</strong><br>{{suspension_reason}}</p>
-    </div>
-    <p><strong>To lift this suspension, you must:</strong></p>
-    <ol style="font-size: 14px;">
-      <li>Clear all outstanding levy balances</li>
-      <li>Pass a secondary compliance inspection</li>
-      <li>File a reinstatement request via the LGA portal</li>
-    </ol>
-    <p style="font-size: 13px; color: #6b7280;">Operating under a suspended permit is a violation of LGA commercial regulations and may attract further penalties.</p>
+    {{/if}}
+    <p style="font-size: 13px; color: #6b7280;">Your certificate will be generated and made available shortly.</p>
+    <a href="${BASE_URL}/dashboard/applications/{{application_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">View Application →</a>
   </div>
 </body>
 </html>`,
@@ -755,8 +548,7 @@ export const accountTemplates = {
 // ============================================================
 
 export const NotificationTemplates = {
-  soo: sooTemplates,
-  permit: permitTemplates,
+  application: applicationTemplates,
   complaint: complaintTemplates,
   account: accountTemplates,
 };

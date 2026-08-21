@@ -156,11 +156,10 @@ export const login = async (
       tokenVersion,
     });
     const refreshToken = generateRefreshToken({ id: user.id });
-    console.log(accessToken, "❤️");
 
     await prisma.user.update({
       where: { id: user.id },
-      data: {},
+      data: { lastLoginAt: new Date() },
     });
 
     return sendSuccess(res, {
@@ -172,6 +171,8 @@ export const login = async (
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        emailVerifiedAt:user.emailVerifiedAt,
+        onboardingCompleted: user.onboardingCompleted,
         isActive: user.isActive,
         // passwordResetRequired: user.passwordResetRequired, // NEW
       },

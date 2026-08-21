@@ -659,6 +659,7 @@ export const accountTemplates = {
       <div style="text-align: center; margin: 32px 0;">
         <a
           href="{{verification_link}}"
+          target="_blank"
           style="
             display: inline-block;
             background: #1a4731;

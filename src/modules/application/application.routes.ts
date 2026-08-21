@@ -21,12 +21,12 @@ const router = Router();
 
 // Configure multer storage
 const diskStorage = multer.diskStorage({
-  destination: (req: Request, file: multer.File, cb) => {
+  destination: (req: Request, file: Express.Multer.File, cb) => {
     const targetFolder = UPLOAD_FOLDER_MAP.documents;
     ensureDirectoryExists(targetFolder);
     cb(null, targetFolder);
   },
-  filename: (req: Request, file: multer.File, cb) => {
+  filename: (req: Request, file: Express.Multer.File, cb) => {
     const uniqueSuffix = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const ext = path.extname(file.originalname);
     cb(null, `doc-${uniqueSuffix}${ext}`);
@@ -60,7 +60,7 @@ function getActualMimeType(filename: string, detectedMimeType: string): string {
 const upload = multer({
   storage: diskStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req: Request, file: multer.File, cb: multer.FileFilterCallback) => {
+  fileFilter: (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
     const actualMimeType = getActualMimeType(file.originalname, file.mimetype);
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf', 'image/jpg'];
     const ext = path.extname(file.originalname).toLowerCase();

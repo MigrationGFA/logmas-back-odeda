@@ -44,5 +44,7 @@ export const verifyAccessToken = (token: string) => {
     email: string;
     wardId?: string | null; // Extract safely during verification
     tokenVersion: number;
+    onboardingCompleted:boolean;
+    emailVerifiedAt: Date
   };
 };

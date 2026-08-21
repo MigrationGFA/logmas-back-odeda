@@ -12,12 +12,12 @@ export const createApplication = async (
   res: Response,
   next: NextFunction,
 ) => {
-  let files = undefined as multer.File[] | undefined;
+  let files = undefined as Express.Multer.File[] | undefined;
   try {
     const user = req.user!;
 
     // multer will populate files as req.files (array)
-    files = (req as any).files as multer.File[] | undefined;
+    files = (req as any).files as Express.Multer.File[] | undefined;
 
     // Build payload from multipart fields (form fields are strings). Parse formData if sent as JSON string.
     const raw = req.body || {};

@@ -68,6 +68,8 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       email: decoded.email,
       wardId: decoded.wardId,
       tokenVersion: decoded.tokenVersion,
+      onboardingCompleted: decoded.onboardingCompleted,
+      emailVerifiedAt: decoded.emailVerifiedAt
     };
     next();
   } catch (error) {

@@ -36,7 +36,7 @@ async function main() {
   // console.log(emailResult);
 
   console.log("\n=== 4. Sending a real template (soo.invoiceGenerated) to both channels ===");
-  const template = NotificationTemplates.soo.invoiceGenerated;
+  const template = NotificationTemplates.application.invoiceGenerated;
   const vars = {
     applicant_name: "Evans (Test)",
     application_id: "TEST-0001",

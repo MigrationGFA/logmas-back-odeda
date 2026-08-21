@@ -22,14 +22,15 @@ async function main() {
   console.log(plainResult);
 
   console.log("\n=== 2. Templated SMS (soo.invoiceGenerated) ===");
-  const template = NotificationTemplates.soo.invoiceGenerated;
+  const template = NotificationTemplates.application.applicationSubmitted;
   const templatedResult = await sendSms({
     to: TEST_PHONE,
     message: interpolate(template.sms, {
       applicant_name: "Evans (Test)",
+      service_name:"Test service",
       application_id: "TEST-0001",
-      payment_amount: "₦5,000",
-      checkout_link: "https://ijebunortheastlga.gov.ng/pay/test",
+      fee_amount: "₦5,000",
+      // checkout_link: "https://ijebunortheastlga.gov.ng/pay/test",
     }),
   });
   console.log(templatedResult);

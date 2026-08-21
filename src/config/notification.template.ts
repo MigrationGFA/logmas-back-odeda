@@ -20,6 +20,7 @@ const BASE_URL = process.env.FRONTEND_URL;
 export const applicationTemplates = {
   // Application Submitted - Initial Confirmation
   applicationSubmitted: {
+    sms: `Hello {{applicant_name}}, your {{service_name}} application (#{{application_id}}) has been received. Please pay the processing fee of {{fee_amount}} to initiate review`,
     emailSubject: `Application Submitted: #{{application_number}} - {{service_name}}`,
     emailHtml: `
 <!DOCTYPE html>

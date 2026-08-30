@@ -95,6 +95,13 @@ export const createApplication = async (
       },
     });
 
+    if(!files){
+      const err: any = new Error("Files not uploaded");
+      err.statusCode = 400;
+      err.code = "FILES_NOT_UPLOADED";
+      throw err;
+    }
+
     // 5. Create ApplicationDocument records if files were provided
     if (files && files.length > 0) {
       for (const f of files) {
@@ -110,30 +117,7 @@ export const createApplication = async (
       }
     }
 
-    try {
-      const fullName = `${application.applicant.firstName} ${application.applicant.lastName}`;
-      await notify({
-        userId: application.applicantId,
-        to: {
-          email: application.applicant.email,
-          phone: application.applicant.phone ?? "",
-        },
-        templateKey: "application.applicationSubmitted",
-        vars: {
-          applicant_name: fullName,
-          application_number: application.applicationNumber,
-          service_name: application.service.name,
-          application_id: application.id,
-          fee_amount: application.feeAmount.toString(),
-        },
-        channels: ["email", "sms"],
-      });
-    } catch (notifyErr) {
-      console.error(
-        "[createApplication] notify() failed, continuing anyway:",
-        notifyErr,
-      );
-    }
+   
 
     return { application, invoice };
   });

@@ -6,6 +6,7 @@ import {
   User,
   PaymentStatus,
   PaymentMethod,
+  ServiceCategory,
 } from "@prisma/client";
 import { prisma } from "../../utils/prisma";
 
@@ -133,7 +134,7 @@ export const fetchMetricsByRole = async (
     }
 
     case Role.treasurer: {
-      // Treasurer: aggregate confirmed payments and invoices
+      // Treasurer: Aggregate confirmed payments and revenue metrics
       const [confirmedPayments, pendingInvoices, activeOfficers] =
         await Promise.all([
           prisma.payment.findMany({
@@ -142,25 +143,40 @@ export const fetchMetricsByRole = async (
               invoice: {
                 include: {
                   application: {
-                    include: { service: { select: { name: true } } },
+                    include: {
+                      service: { select: { name: true, category: true } },
+                    },
                   },
                 },
               },
             },
           }),
           prisma.invoice.findMany({
-            where: { paymentStatus: { not: PaymentStatus.confirmed } },
-            select: { id: true, amount: true },
+            where: {
+              paymentStatus: {
+                notIn: [PaymentStatus.confirmed],
+              },
+            },
+            select: {
+              id: true,
+              amount: true,
+              paymentStatus: true,
+            },
           }),
           prisma.user.count({
-            where: { role: Role.field_officer, isActive: true },
+            where: {
+              role: Role.field_officer,
+              isActive: true,
+            },
           }),
         ]);
 
+      // Calculate metrics
       const totalRevenue = confirmedPayments.reduce(
         (s, p) => s + Number(p.amount ?? 0),
         0,
       );
+
       const pendingAmount = pendingInvoices.reduce(
         (s, inv) => s + Number(inv.amount ?? 0),
         0,
@@ -190,15 +206,48 @@ export const fetchMetricsByRole = async (
         ([service, amount]) => ({ service, amount }),
       );
 
+      // Category revenue breakdown
+      const categoryMap: Record<string, number> = {};
+      confirmedPayments.forEach((p) => {
+        const cat =
+          p.invoice?.application?.service?.category ??
+          ServiceCategory.CERTIFICATE;
+        categoryMap[cat] = (categoryMap[cat] || 0) + Number(p.amount ?? 0);
+      });
+
+      const categoryBreakdown = Object.entries(categoryMap).map(
+        ([category, amount]) => ({
+          category: category
+            .replace(/_/g, " ")
+            .toLowerCase()
+            .replace(/\b\w/g, (l) => l.toUpperCase()),
+          amount,
+        }),
+      );
+
+      // Get invoice count
+      const invoiceCount = await prisma.invoice.count({
+        where: {
+          application: {
+            status: {
+              in: [ApplicationStatus.submitted, ApplicationStatus.under_review],
+            },
+          },
+        },
+      });
+
       return {
         metrics: {
           totalRevenue,
           pendingAmount,
           activeOfficers,
           transactionCount: confirmedPayments.length,
+          invoiceGeneratedCount: invoiceCount,
+          pendingInvoiceCount: pendingInvoices.length,
         },
         revenueTrend,
         serviceBreakdown,
+        categoryBreakdown,
       };
     }
 

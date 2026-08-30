@@ -75,6 +75,8 @@ export async function sendEmail({
   }
 
   try {
+
+    verifyConnection()
     const info = await transporter.sendMail({
       from: `"${SMTP_FROM_NAME}" <${SMTP_USER}>`,
       to,

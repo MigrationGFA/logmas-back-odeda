@@ -16,6 +16,7 @@ import {
   adminApproveApplication,
   adminDeclineApplication,
 } from './application.controller';
+import { getActiveServiceByCode } from '../services/service.service';
 
 const router = Router();
 
@@ -114,8 +115,8 @@ const uploadHandler = (req: Request, res: Response, next: NextFunction) => {
       }
     });
     
-    console.log('Files received (with corrected MIME types):', files);
-    console.log('Body received:', req.body);
+    // console.log('Files received (with corrected MIME types):', files);
+    // console.log('Body received:', req.body);
     
     next();
   });
@@ -144,7 +145,7 @@ const validateDocumentTypes = (req: Request, res: Response, next: NextFunction) 
 };
 
 // Your existing validation for document types per service
-const checkServiceDocumentTypes = (req: Request, res: Response, next: NextFunction) => {
+const checkServiceDocumentTypes = async (req: Request, res: Response, next: NextFunction) => {
   // This is where you check if the uploaded document types match what the service requires
   // You'll need to implement this based on your service configuration
   
@@ -155,22 +156,22 @@ const checkServiceDocumentTypes = (req: Request, res: Response, next: NextFuncti
   // You'll need to fetch the service from DB and check its required documents
   
   // For now, just log and pass through
-  console.log('Uploaded document fields:', uploadedFields);
   
   // If you have a service config that specifies allowed document types:
-  // const serviceId = req.body.serviceId;
-  // const service = await getServiceById(serviceId);
-  // const allowedDocumentTypes = service.allowedDocumentTypes || [];
-  // const invalidTypes = uploadedFields.filter(f => !allowedDocumentTypes.includes(f));
-  // if (invalidTypes.length > 0) {
-  //   return sendError(
-  //     res,
-  //     `Invalid document types for this service: ${invalidTypes.join(', ')}`,
-  //     'VALIDATION_ERROR',
-  //     null,
-  //     400
-  //   );
-  // }
+  const serviceId = req.body.serviceId;
+  const service = await getActiveServiceByCode(serviceId);
+  // console.log('Uploaded document fields:',service);
+  const allowedDocumentTypes = service.requirements || [];
+  const invalidTypes = uploadedFields.filter(f => !allowedDocumentTypes.includes(f));
+  if (invalidTypes.length > 0) {
+    return sendError(
+      res,
+      `Invalid document types for this service: ${invalidTypes.join(', ')}`,
+      'VALIDATION_ERROR',
+      null,
+      400
+    );
+  }
   
   next();
 };

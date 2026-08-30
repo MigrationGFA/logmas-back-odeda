@@ -12,6 +12,7 @@ export const listActiveServices = async (category?: string) => {
           id: true,
           amount: true,
           status: true,
+          updatedAt:true
         },
       },
       _count: {

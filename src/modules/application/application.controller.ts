@@ -284,6 +284,33 @@ export const createApplication = async (
       files: filesMeta,
     } as any);
 
+    const {application} = result
+
+     try {
+      const fullName = `${application.applicant.firstName} ${application.applicant.lastName}`;
+      await notify({
+        userId: application.applicantId,
+        to: {
+          email: application.applicant.email,
+          phone: application.applicant.phone ?? "",
+        },
+        templateKey: "application.applicationSubmitted",
+        vars: {
+          applicant_name: fullName,
+          application_number: application.applicationNumber,
+          service_name: application.service.name,
+          application_id: application.id,
+          fee_amount: application.feeAmount.toString(),
+        },
+        channels: ["email", "sms"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[createApplication] notify() failed, continuing anyway:",
+        notifyErr,
+      );
+    }
+
     return sendSuccess(res, result, null, 201);
   } catch (err: any) {
     // Cleanup uploaded files on failure

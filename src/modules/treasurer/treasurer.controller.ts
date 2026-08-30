@@ -333,6 +333,8 @@ export const getServiceFee = async (
  * PUT /api/v1/treasurer/fees/:serviceId
  * Create or update ServiceFeeConfig for the service
  */
+
+
 export const upsertServiceFee = async (
   req: Request,
   res: Response,
@@ -342,7 +344,7 @@ export const upsertServiceFee = async (
     const treasurerId = req.user!.id;
     const { serviceId } = req.params;
 
-    // Validate payload (simple zod check to ensure amount exists and positive)
+    // Validate payload
     const parsed = upsertServiceFeeSchema.safeParse(req.body);
     if (!parsed.success)
       return sendError(
@@ -353,7 +355,8 @@ export const upsertServiceFee = async (
         400,
       );
 
-    const amount = parsed.data.amount;
+    const { amount, status } = parsed.data;
+    const statusEnum = status ? "ACTIVE" : "INACTIVE";
 
     // Verify service
     const service = await prisma.service.findUnique({
@@ -364,15 +367,20 @@ export const upsertServiceFee = async (
     if (!service.isActive)
       return sendError(res, "Service is not active", "BAD_REQUEST", null, 400);
 
-    // Upsert fee config: since serviceId is unique in ServiceFeeConfig, attempt find then create/update in transaction
+    // Upsert fee config
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.serviceFeeConfig.findUnique({
         where: { serviceId: service.id },
       });
+      
       if (existing) {
         const updated = await tx.serviceFeeConfig.update({
           where: { serviceId: service.id },
-          data: { amount, updatedById: treasurerId, status: "ACTIVE" },
+          data: { 
+            amount, 
+            updatedById: treasurerId, 
+            status: statusEnum 
+          },
           include: {
             updatedBy: {
               select: { id: true, firstName: true, lastName: true },
@@ -386,7 +394,10 @@ export const upsertServiceFee = async (
             entity: "ServiceFeeConfig",
             entityId: updated.id,
             userId: treasurerId,
-            details: { before: { amount: existing.amount }, after: { amount } },
+            details: { 
+              before: { amount: existing.amount, status: existing.status }, 
+              after: { amount, status: statusEnum } 
+            },
             ipAddress: getIp(req),
           },
         });
@@ -398,7 +409,7 @@ export const upsertServiceFee = async (
         data: {
           serviceId: service.id,
           amount,
-          status: "ACTIVE",
+          status: statusEnum,
           updatedById: treasurerId,
         },
         include: {
@@ -406,16 +417,16 @@ export const upsertServiceFee = async (
         },
       });
 
-      // await tx.auditLog.create({
-      //   data: {
-      //     action: 'pricing_updated',
-      //     entity: 'ServiceFeeConfig',
-      //     entityId: created.id,
-      //     userId: treasurerId,
-      //     details: { created: { amount } },
-      //     ipAddress: getIp(req),
-      //   },
-      // });
+      await tx.auditLog.create({
+        data: {
+          action: 'pricing_updated',
+          entity: 'ServiceFeeConfig',
+          entityId: created.id,
+          userId: treasurerId,
+          details: { created: { amount, status: statusEnum } },
+          ipAddress: getIp(req),
+        },
+      });
 
       return created;
     });

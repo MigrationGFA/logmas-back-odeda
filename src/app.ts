@@ -97,7 +97,7 @@ app.use('/api/v1/chairman',    chairmanRoutes);
 
 
 // Shared Interactive Engine Schema Verification Explorer Links UI Routes
-app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+// app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Catch-All Global Pipeline Middleware Interceptors Engine Layer Handler
 app.use(errorHandler);

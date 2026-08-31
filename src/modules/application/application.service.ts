@@ -17,12 +17,20 @@ interface CreateAppParams {
   createdById?: string | null;
   serviceId: string;
   formData: unknown;
+  createInvoice?: boolean;
 }
 
 export const createApplication = async (
   params: CreateAppParams & { files?: UploadedFileMeta[] },
 ) => {
-  const { applicantId, serviceId, formData, files, createdById } = params;
+  const {
+    applicantId,
+    serviceId,
+    formData,
+    files,
+    createdById,
+    createInvoice = true,
+  } = params;
 
   // Transaction: create application and invoice atomically
   const result = await prisma.$transaction(async (tx) => {
@@ -84,18 +92,27 @@ export const createApplication = async (
       },
     });
 
+    let invoice = null;
     // 4. Create invoice referencing the application
-    const invoice = await tx.invoice.create({
-      data: {
-        invoiceNumber: generateReceiptNumber("INV"),
-        applicationId: application.id,
-        amount: feeAmount,
-        paymentStatus: "pending",
-        createdById: createdById || applicantId || null,
-      },
-    });
+    if (createInvoice) {
+      const invoiceCreatorId = createdById || applicantId;
 
-    if(!files){
+      invoice = await tx.invoice.create({
+        data: {
+          invoiceNumber: generateReceiptNumber("INV"),
+          application: { connect: { id: application.id } }, // changed from applicationId
+          service: { connect: { id: serviceId } },
+          amount: feeAmount,
+          paymentStatus: "pending",
+          ...(invoiceCreatorId
+            ? {
+                createdBy: { connect: { id: invoiceCreatorId } },
+              }
+            : {}),
+        },
+      });
+    }
+    if (!files) {
       const err: any = new Error("Files not uploaded");
       err.statusCode = 400;
       err.code = "FILES_NOT_UPLOADED";
@@ -116,8 +133,6 @@ export const createApplication = async (
         });
       }
     }
-
-   
 
     return { application, invoice };
   });
@@ -150,6 +165,41 @@ export const getApplicationByIdOrNumber = async (idOrNumber: string) => {
   return app;
 };
 
+// export const listApplicationsForUser = async (
+//   user: any,
+//   page = 1,
+//   limit = 25,
+// ) => {
+//   const skip = (page - 1) * limit;
+//   const where: any = {};
+
+//   if (user.role === "citizen" || user.role === "business_owner") {
+//     where.applicantId = user.id;
+//   } else if (user.role === "field_officer") {
+//     // Field officers see applications they created
+//     where.createdById = user.id;
+//   }
+
+//   const items = await prisma.application.findMany({
+//     where,
+//     include: {
+//       service: true,
+//       invoice: true,
+//       certificate: true,
+//       applicationDocuments: true,
+//       applicant:true
+//     },
+//     orderBy: { createdAt: "desc" },
+//     skip,
+//     take: limit,
+//   });
+
+//   const total = await prisma.application.count({ where });
+
+//   return { items, meta: { total, page, limit } };
+// };
+
+
 export const listApplicationsForUser = async (
   user: any,
   page = 1,
@@ -161,17 +211,114 @@ export const listApplicationsForUser = async (
   if (user.role === "citizen" || user.role === "business_owner") {
     where.applicantId = user.id;
   } else if (user.role === "field_officer") {
-    // Field officers see applications they created
     where.createdById = user.id;
   }
+  // For privileged roles (super_admin, lga_admin, etc.) - no restrictions
 
   const items = await prisma.application.findMany({
     where,
-    include: {
-      service: true,
-      invoice: true,
-      certificate: true,
-      applicationDocuments: true,
+    select: {
+      id: true,
+      applicationNumber: true,
+      status: true,
+      feeAmount: true,
+      formData: true,
+      paymentFirst: true,
+      createdAt: true,
+      updatedAt: true,
+      reviewedAt: true,
+      declineReason: true,
+      serviceId: true,
+      applicantId: true,
+      createdById: true,
+      reviewedById: true,
+      service: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          revenueHead: true,
+          description: true,
+          estimatedDays: true,
+          certificateType: true,
+          isActive: true,
+        },
+      },
+      invoice: {
+        select: {
+          id: true,
+          invoiceNumber: true,
+          amount: true,
+          paymentStatus: true,
+          paidAt: true,
+          transactionRef: true,
+          virtualAccountNumber: true,
+          virtualBankName: true,
+          payments: {
+            select:{
+              method:true
+            }
+          }
+        },
+      },
+      certificate: {
+        select: {
+          id: true,
+          certificateNumber: true,
+          verificationCode:true,
+          issuedAt: true,
+          expiresAt: true,
+          pdfUrl: true,
+          issuedBy:true
+        },
+      },
+      applicationDocuments: {
+        select: {
+          id: true,
+          documentType: true,
+          originalName: true,
+          fileName: true,
+          url: true,
+          mimeType: true,
+          fileSize: true,
+          uploadedAt: true,
+        },
+        orderBy: {
+          uploadedAt: "desc",
+        },
+        take: 10, // Limit to most recent 10 documents
+      },
+      applicant: {
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          address: true,
+          town: true,
+        },
+      },
+      createdBy: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+        },
+      },
+      reviewedBy: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
     skip,
@@ -180,5 +327,16 @@ export const listApplicationsForUser = async (
 
   const total = await prisma.application.count({ where });
 
-  return { items, meta: { total, page, limit } };
+
+  return {
+    items,
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasNextPage: page * limit < total,
+      hasPreviousPage: page > 1,
+    },
+  };
 };

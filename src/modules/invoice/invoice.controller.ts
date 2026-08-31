@@ -133,11 +133,7 @@ export const fetchInvoicesHubData = async ({
   const totalCollected = invoices.reduce((sum, invoice) => {
     const paid = invoice.payments
       .filter((payment) => payment.status === "confirmed")
-      .reduce(
-        (paymentSum, payment) =>
-          paymentSum + Number(payment.amount),
-        0,
-      );
+      .reduce((paymentSum, payment) => paymentSum + Number(payment.amount), 0);
 
     return sum + paid;
   }, 0);
@@ -145,11 +141,7 @@ export const fetchInvoicesHubData = async ({
   const outstanding = invoices.reduce((sum, invoice) => {
     const paid = invoice.payments
       .filter((payment) => payment.status === "confirmed")
-      .reduce(
-        (paymentSum, payment) =>
-          paymentSum + Number(payment.amount),
-        0,
-      );
+      .reduce((paymentSum, payment) => paymentSum + Number(payment.amount), 0);
 
     return sum + Math.max(Number(invoice.amount) - paid, 0);
   }, 0);
@@ -160,9 +152,7 @@ export const fetchInvoicesHubData = async ({
   );
 
   const avgPayment =
-    transactions > 0
-      ? Math.round(totalCollected / transactions)
-      : 0;
+    transactions > 0 ? Math.round(totalCollected / transactions) : 0;
 
   // ---------------------------------------------------------
   // Return
@@ -249,10 +239,50 @@ export const getInvoiceById = async (
     const { id } = req.params;
     const { id: userId, role } = req.user!;
 
-    const invoice = await prisma.invoice.findUnique({
-      where: {
-        invoiceNumber: String(id),
-      },
+    // Define roles that can view any invoice
+    const privilegedRoles: Role[] = [
+      "super_admin",
+      "lga_admin",
+      "chairman",
+      "treasurer",
+      "auditor",
+      "ward_councillor",
+      "field_officer",
+    ];
+
+    const isPrivileged = privilegedRoles.includes(role);
+
+    // Build where clause based on role
+    const whereClause: any = {
+      invoiceNumber: String(id),
+    };
+
+    // If not privileged, restrict to own invoices
+    if (!isPrivileged) {
+      whereClause.OR = [
+        {
+          application: {
+            applicantId: userId,
+          },
+        },
+        {
+          createdById: userId,
+        },
+        {
+          assignedOfficerId: userId,
+        },
+        {
+          payments: {
+            some: {
+              paidById: userId,
+            },
+          },
+        },
+      ];
+    }
+
+    const invoice = await prisma.invoice.findFirst({
+      where: whereClause,
       include: {
         application: {
           select: {
@@ -272,10 +302,48 @@ export const getInvoiceById = async (
           orderBy: {
             createdAt: "desc",
           },
+          select: {
+            id: true,
+            amount: true,
+            method: true,
+            status: true,
+            reference: true,
+            gatewayRef: true,
+            narration: true,
+            confirmedAt: true,
+            createdAt: true,
+            paidById: true,
+          },
         },
         receipts: {
           orderBy: {
             issuedAt: "desc",
+          },
+          select: {
+            id: true,
+            receiptNumber: true,
+            verificationCode: true,
+            qrToken: true,
+            amountPaid: true,
+            pdfUrl: true,
+            issuedAt: true,
+            issuedById: true,
+          },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        service: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            description: true,
           },
         },
       },
@@ -284,13 +352,34 @@ export const getInvoiceById = async (
     if (!invoice) {
       return sendError(
         res,
-        "Invoice not found",
+        "Invoice not found or you don't have permission to view it",
         "NOT_FOUND",
         null,
         404,
       );
     }
 
+    // Additional check: For business_owner and citizen, verify they own the invoice
+    // This is redundant with the where clause but added for extra security
+    if (!isPrivileged && (role === "business_owner" || role === "citizen")) {
+      const isOwner =
+        invoice.application?.applicantId === userId ||
+        invoice.createdById === userId ||
+        invoice.assignedOfficerId === userId ||
+        invoice.payments.some((payment) => payment.paidById === userId);
+
+      if (!isOwner) {
+        return sendError(
+          res,
+          "You don't have permission to view this invoice",
+          "FORBIDDEN",
+          null,
+          403,
+        );
+      }
+    }
+
+    // Return sanitized response with only necessary fields
 
     return sendSuccess(res, invoice);
   } catch (err) {
@@ -383,5 +472,3 @@ export const recordInvoicePayment = async (
     next(err);
   }
 };
-
-

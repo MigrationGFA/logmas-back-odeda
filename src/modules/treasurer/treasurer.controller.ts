@@ -334,7 +334,6 @@ export const getServiceFee = async (
  * Create or update ServiceFeeConfig for the service
  */
 
-
 export const upsertServiceFee = async (
   req: Request,
   res: Response,
@@ -372,19 +371,26 @@ export const upsertServiceFee = async (
       const existing = await tx.serviceFeeConfig.findUnique({
         where: { serviceId: service.id },
       });
-      
+
       if (existing) {
         const updated = await tx.serviceFeeConfig.update({
           where: { serviceId: service.id },
-          data: { 
-            amount, 
-            updatedById: treasurerId, 
-            status: statusEnum 
+          data: {
+            amount,
+            updatedById: treasurerId,
+            status: statusEnum,
           },
           include: {
             updatedBy: {
               select: { id: true, firstName: true, lastName: true },
             },
+          },
+        });
+
+        await tx.service.update({
+          where: { id: String(service.id) },
+          data: {
+            isActive: statusEnum === "ACTIVE" ? true : false,
           },
         });
 
@@ -394,9 +400,9 @@ export const upsertServiceFee = async (
             entity: "ServiceFeeConfig",
             entityId: updated.id,
             userId: treasurerId,
-            details: { 
-              before: { amount: existing.amount, status: existing.status }, 
-              after: { amount, status: statusEnum } 
+            details: {
+              before: { amount: existing.amount, status: existing.status },
+              after: { amount, status: statusEnum },
             },
             ipAddress: getIp(req),
           },
@@ -419,8 +425,8 @@ export const upsertServiceFee = async (
 
       await tx.auditLog.create({
         data: {
-          action: 'pricing_updated',
-          entity: 'ServiceFeeConfig',
+          action: "pricing_updated",
+          entity: "ServiceFeeConfig",
           entityId: created.id,
           userId: treasurerId,
           details: { created: { amount, status: statusEnum } },

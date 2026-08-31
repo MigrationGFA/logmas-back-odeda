@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 
-import { confirmPayment } from "./payment.service";
+import { completeNewApplicationAfterPayment, confirmPayment } from "./payment.service";
 import { prisma } from "../../utils/prisma";
 import { sendError, sendSuccess } from "../../utils/response";
 import { generateReference } from "../../utils/generators";
@@ -21,8 +21,8 @@ import { sendEmail } from "../notification/email.service";
 // `:id` is the invoiceNumber, matching your existing convention.
 
  const callbackUrl = process.env.NODE_ENV === "production"
-      ? `${process.env.PAYSTACK_CALLBACK_URL}/dashboard/payment/result`
-      : "http://localhost:3002/dashboard/payment/result";
+      ? `${process.env.PAYSTACK_CALLBACK_URL}/payment/result`
+      : "http://localhost:3000/payment/result";
 
 export const initializePaystackPayment = async (
   req: Request,
@@ -99,43 +99,144 @@ export const initializePaystackPayment = async (
   }
 };
 
-// GET /api/v1/payments/verify/:reference
-// This is what your frontend calls on refresh / on landing back from Paystack's redirect.
+interface NewFlowPaymentBody {
+  serviceId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+}
+
+export const initializePaystackPaymentNewFlow = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+
+    const { serviceId, fullName, email, phone } =
+    req.body as NewFlowPaymentBody;
+    
+    if (!serviceId || !fullName || !email || !phone) {
+      return sendError(
+        res,
+        "Service ID, full name, email and phone number are required",
+        "VALIDATION_ERROR",
+        null,
+        400,
+      );
+    }
+
+    // 1. Get service + current fee
+    const service = await prisma.service.findUnique({
+      where: { id: serviceId },
+      include: {
+        feeConfig: true,
+      },
+    });
+
+    if (!service) {
+      return sendError(
+        res,
+        "Service not found",
+        "NOT_FOUND",
+        null,
+        404,
+      );
+    }
+
+    if (!service.isActive) {
+      return sendError(
+        res,
+        "Service is not active",
+        "SERVICE_INACTIVE",
+        null,
+        400,
+      );
+    }
+
+    if (!service.feeConfig || service.feeConfig.status !== "ACTIVE") {
+      return sendError(
+        res,
+        "Service fee is not configured",
+        "SERVICE_FEE_NOT_CONFIGURED",
+        null,
+        400,
+      );
+    }
+
+    const amount = Number(service.feeConfig.amount);
+    const amountKobo = Math.round(amount * 100);
+
+    // 2. Check whether the person already has an account.
+    // We DON'T create anything yet.
+    const existingUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+      },
+    });
+
+    // 3. Generate Paystack reference
+    const reference = generateReference("PAY");
+
+    // 4. Everything needed to finish the application later
+    const metadata = {
+      flow: "new_application",
+      serviceId: service.id,
+      serviceCode: service.code,
+      serviceName: service.name,
+      fullName: fullName.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
+
+      // Useful if the person already exists
+      userId: existingUser?.id ?? null,
+    };
+
+    // 5. Initialize Paystack
+    const gatewayResult = await initializeTransaction({
+      email: email.toLowerCase().trim(),
+      amountKobo,
+      reference,
+      callbackUrl,
+      metadata,
+    });
+
+    if (!gatewayResult.success) {
+      return sendError(
+        res,
+        gatewayResult.error ?? "Failed to initialize payment",
+        "PAYMENT_INITIALIZATION_FAILED",
+        null,
+        400,
+      );
+    }
+
+    return sendSuccess(res, {
+      paymentUrl: gatewayResult.data!.authorization_url,
+      reference: gatewayResult.data!.reference,
+      amount,
+      serviceId: service.id,
+      flow: "new_application",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const verifyPaystackPayment = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    // Explicitly cast to string to fix TS2322 (string | string[] type bounds)
     const reference = req.params.reference as string;
 
-    const payment = await prisma.payment.findUnique({
-      where: { reference },
-      include: { invoice: true },
-    });
-    if (!payment)
-      return sendError(
-        res,
-        "Payment reference not found",
-        "NOT_FOUND",
-        null,
-        404,
-      );
-
-    // Safely assert relation types to handle uncompiled local prisma clients
-    const paymentWithInvoice = payment as typeof payment & { invoice: any };
-
-    // Already confirmed — nothing to do, return current state.
-    if (paymentWithInvoice.status === "confirmed") {
-      return sendSuccess(res, {
-        status: "confirmed",
-        payment: paymentWithInvoice,
-        invoice: paymentWithInvoice.invoice,
-      });
-    }
-
+    // 1. Ask Paystack what happened
     const verifyResult = await verifyTransaction(reference);
+
     if (!verifyResult.success) {
       return sendError(
         res,
@@ -146,15 +247,69 @@ export const verifyPaystackPayment = async (
       );
     }
 
+    // 2. Payment was not successful
     if (verifyResult.data!.status !== "success") {
-      // Paystack says it's not paid yet — leave it pending.
       return sendSuccess(res, {
         status: verifyResult.data!.status,
+        reference,
+      });
+    }
+
+    // 3. Check Paystack metadata
+    const metadata = verifyResult.data!.metadata as any;
+
+    // =====================================================
+    // NEW PUBLIC PAYMENT FLOW
+    // =====================================================
+
+    if (metadata?.flow === "new_application") {
+      const result = await completeNewApplicationAfterPayment({
+        paymentReference: reference,
+        amount: verifyResult.data!.amountKobo / 100,
+        gatewayRef: reference,
+        metadata,
+      });
+
+      return sendSuccess(res, {
+        status: "confirmed",
+        flow: "new_application",
+        ...result,
+      });
+    }
+
+    // =====================================================
+    // EXISTING PAYMENT FLOW
+    // =====================================================
+
+    const payment = await prisma.payment.findUnique({
+      where: { reference },
+      include: { invoice: true },
+    });
+
+    if (!payment) {
+      return sendError(
+        res,
+        "Payment reference not found",
+        "NOT_FOUND",
+        null,
+        404,
+      );
+    }
+
+    const paymentWithInvoice = payment as typeof payment & {
+      invoice: any;
+    };
+
+    // Already confirmed
+    if (paymentWithInvoice.status === "confirmed") {
+      return sendSuccess(res, {
+        status: "confirmed",
         payment: paymentWithInvoice,
         invoice: paymentWithInvoice.invoice,
       });
     }
 
+    // Confirm existing-flow payment
     const confirmResult = await confirmPayment({
       invoiceId: paymentWithInvoice.invoiceId,
       amount: verifyResult.data!.amountKobo / 100,
@@ -162,7 +317,7 @@ export const verifyPaystackPayment = async (
       reference,
       gatewayRef: reference,
       paidById: paymentWithInvoice.paidById,
-      confirmedById: null, // system-confirmed
+      confirmedById: null,
     });
 
     return sendSuccess(res, {
@@ -179,45 +334,80 @@ export const verifyPaystackPayment = async (
 // POST /api/v1/payments/webhook
 export const paystackWebhook = async (req: Request, res: Response) => {
   const signature = req.headers["x-paystack-signature"] as string | undefined;
-  const rawBody = req.body as Buffer; // requires express.raw() on this route
+  const rawBody = req.body as Buffer;
 
   if (!verifyWebhookSignature(rawBody, signature)) {
     return res
       .status(401)
-      .json({ success: false, message: "Invalid webhook signature" });
+      .json({
+        success: false,
+        message: "Invalid webhook signature",
+      });
   }
 
-  // Acknowledge immediately — Paystack retries if it doesn't get a fast 200.
+  // Acknowledge Paystack immediately
   res.status(200).json({ received: true });
 
   try {
     const event = JSON.parse(rawBody.toString("utf8"));
 
-    if (event.event === "charge.success") {
-      const { reference, amount } = event.data;
-
-      const payment = await prisma.payment.findUnique({ 
-        where: { reference: reference as string } 
-      });
-      if (!payment) {
-        console.error(
-          `[paystack.webhook] No payment found for reference ${reference}`,
-        );
-        return;
-      }
-
-      await confirmPayment({
-        invoiceId: payment.invoiceId,
-        amount: amount / 100,
-        method: "online_gateway",
-        reference: reference as string,
-        gatewayRef: reference as string,
-        paidById: payment.paidById,
-        confirmedById: null,
-      });
+    if (event.event !== "charge.success") {
+      return;
     }
+
+    const {
+      reference,
+      amount,
+      metadata,
+    } = event.data;
+
+    // =====================================================
+    // NEW PUBLIC APPLICATION FLOW
+    // =====================================================
+
+    if (metadata?.flow === "new_application") {
+      await completeNewApplicationAfterPayment({
+        paymentReference: reference,
+        amount: amount / 100,
+        gatewayRef: reference,
+        metadata,
+      });
+
+      return;
+    }
+
+    // =====================================================
+    // EXISTING FLOW
+    // =====================================================
+
+    const payment = await prisma.payment.findUnique({
+      where: {
+        reference: reference as string,
+      },
+    });
+
+    if (!payment) {
+      console.error(
+        `[paystack.webhook] No payment found for reference ${reference}`,
+      );
+      return;
+    }
+
+    await confirmPayment({
+      invoiceId: payment.invoiceId,
+      amount: amount / 100,
+      method: "online_gateway",
+      reference: reference as string,
+      gatewayRef: reference as string,
+      paidById: payment.paidById,
+      confirmedById: null,
+    });
+
   } catch (err) {
-    console.error("[paystack.webhook] processing error:", err);
+    console.error(
+      "[paystack.webhook] processing error:",
+      err,
+    );
   }
 };
 

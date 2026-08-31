@@ -34,7 +34,7 @@ pkill -u getfjupm node
 
 npx prisma db push
 
-npx prisma migrate dev --name major_auth_update
+npx prisma migrate dev --name major_paystack_update
 
 
 # seed plan for revenue category if need be

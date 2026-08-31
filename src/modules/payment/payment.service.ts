@@ -7,6 +7,8 @@ import {
   generateVerificationCode,
   generateQrToken,
 } from "../../utils/generators";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 interface ConfirmPaymentParams {
   invoiceId: string;
@@ -184,7 +186,7 @@ export async function confirmPayment({
       },
     });
 
-     await tx.invoice.update({
+    await tx.invoice.update({
       where: {
         id: invoiceId,
       },
@@ -246,3 +248,318 @@ export async function confirmPayment({
     isFullPayment,
   };
 }
+
+interface NewApplicationPaymentParams {
+  paymentReference: string;
+  amount: number;
+  gatewayRef?: string;
+  metadata: {
+    flow: string;
+    serviceId: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    userId?: string | null;
+  };
+}
+
+export const completeNewApplicationAfterPayment = async ({
+  paymentReference,
+  amount,
+  gatewayRef,
+  metadata,
+}: NewApplicationPaymentParams) => {
+  return prisma.$transaction(async (tx) => {
+    // --------------------------------------------------
+    // 1. IDEMPOTENCY CHECK
+    // --------------------------------------------------
+
+    const existingPayment = await tx.payment.findUnique({
+      where: {
+        reference: paymentReference,
+      },
+      include: {
+        invoice: {
+          include: {
+            application: true,
+          },
+        },
+      },
+    });
+
+    // Already processed by webhook or frontend verification
+    if (existingPayment?.status === "confirmed") {
+      return {
+        alreadyProcessed: true,
+        applicationId: existingPayment.invoice?.application?.id ?? null,
+        invoiceId: existingPayment.invoiceId ?? null,
+        paymentId: existingPayment.id,
+        receiptId: await tx.receipt.findUnique({
+          where: {
+            invoiceId: existingPayment.invoiceId,
+          },
+          select: {
+            id: true,
+          },
+        }).then(receipt => receipt?.id ?? null),
+        userId: existingPayment.invoice?.application?.applicantId ?? null,
+        newUserCreated: false,
+      };
+    }
+
+    // --------------------------------------------------
+    // 2. FIND / CREATE USER
+    // --------------------------------------------------
+
+    const email = metadata.email.toLowerCase().trim();
+
+    let user = await tx.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
+
+    let newUserCreated = false;
+    let generatedPassword: string | null = null;
+
+    if (!user) {
+      generatedPassword = crypto.randomBytes(6).toString("base64url");
+
+      const nameParts = metadata.fullName.trim().split(/\s+/);
+
+      const firstName = nameParts.shift() || "";
+      const lastName = nameParts.join(" ") || firstName;
+
+      const hashedPassword = await bcrypt.hash(generatedPassword, 10);
+
+      user = await tx.user.create({
+        data: {
+          email,
+          phone: metadata.phone.trim(),
+          firstName,
+          lastName,
+          password: hashedPassword,
+          role: "citizen",
+          passwordResetRequired: true,
+          onboardingCompleted: false,
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
+
+      newUserCreated = true;
+    }
+
+    // --------------------------------------------------
+    // 3. GET SERVICE
+    // --------------------------------------------------
+
+    const service = await tx.service.findUnique({
+      where: {
+        id: metadata.serviceId,
+      },
+      include: {
+        feeConfig: true,
+      },
+    });
+
+    if (!service) {
+      throw new Error("Service not found");
+    }
+
+    if (!service.isActive) {
+      throw new Error("Service is no longer active");
+    }
+
+    if (!service.feeConfig || service.feeConfig.status !== "ACTIVE") {
+      throw new Error("Service fee is no longer configured");
+    }
+
+    const feeAmount = service.feeConfig.amount;
+
+    // --------------------------------------------------
+    // 4. CREATE APPLICATION
+    // --------------------------------------------------
+
+    const application = await tx.application.create({
+      data: {
+        applicationNumber: generateReceiptNumber("APP"),
+        service: {
+          connect: {
+            id: service.id,
+          },
+        },
+        applicant: {
+          connect: {
+            id: user.id,
+          },
+        },
+        createdBy: {
+          connect: {
+            id: user.id,
+          },
+        },
+        feeAmount,
+        formData: {},
+        status: "draft",
+      },
+      select: {
+        id: true,
+        applicationNumber: true,
+        status: true,
+        feeAmount: true,
+        createdAt: true,
+        serviceId: true,
+        applicantId: true,
+      },
+    });
+
+    // --------------------------------------------------
+    // 5. CREATE INVOICE
+    // --------------------------------------------------
+
+    const invoice = await tx.invoice.create({
+      data: {
+        invoiceNumber: generateReceiptNumber("INV"),
+        application: { connect: { id: application.id } },
+        service: { connect: { id: service.id } },
+        amount: feeAmount,
+        paymentStatus: "confirmed",
+        createdBy: { connect: { id: user.id } },
+        paidAt: new Date(),
+        transactionRef: paymentReference,
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        amount: true,
+        paymentStatus: true,
+        paidAt: true,
+        transactionRef: true,
+        applicationId: true,
+      },
+    });
+
+    // --------------------------------------------------
+    // 6. CREATE CONFIRMED PAYMENT
+    // --------------------------------------------------
+
+    const payment = await tx.payment.create({
+      data: {
+        invoice: {
+          connect: {
+            id: invoice.id,
+          },
+        },
+        amount,
+        method: "online_gateway",
+        status: "confirmed",
+        reference: paymentReference,
+        gatewayRef,
+        paidBy: {
+          connect: {
+            id: user.id,
+          },
+        },
+        confirmedAt: new Date(),
+      },
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        reference: true,
+        gatewayRef: true,
+        confirmedAt: true,
+        invoiceId: true,
+      },
+    });
+
+    // --------------------------------------------------
+    // 7. CREATE RECEIPT
+    // --------------------------------------------------
+
+    const receipt = await tx.receipt.create({
+      data: {
+        receiptNumber: generateReceiptNumber("RCP"),
+        verificationCode: generateVerificationCode(),
+        qrToken: generateQrToken(),
+        amountPaid: feeAmount,
+        invoice: {
+          connect: {
+            id: invoice.id,
+          },
+        },
+        issuedBy: {
+          connect: {
+            id: user.id,
+          },
+        },
+      },
+      select: {
+        id: true,
+        receiptNumber: true,
+        verificationCode: true,
+        qrToken: true,
+        amountPaid: true,
+        issuedAt: true,
+        invoiceId: true,
+      },
+    });
+
+    return {
+      alreadyProcessed: false,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+      application: {
+        id: application.id,
+        applicationNumber: application.applicationNumber,
+        status: application.status,
+        feeAmount: application.feeAmount,
+        createdAt: application.createdAt,
+        serviceId: application.serviceId,
+        applicantId: application.applicantId,
+      },
+      invoice: {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        amount: invoice.amount,
+        paymentStatus: invoice.paymentStatus,
+        paidAt: invoice.paidAt,
+        transactionRef: invoice.transactionRef,
+        applicationId: invoice.applicationId,
+      },
+      payment: {
+        id: payment.id,
+        amount: payment.amount,
+        status: payment.status,
+        reference: payment.reference,
+        gatewayRef: payment.gatewayRef,
+        confirmedAt: payment.confirmedAt,
+        invoiceId: payment.invoiceId,
+      },
+      receipt: {
+        id: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        verificationCode: receipt.verificationCode,
+        qrToken: receipt.qrToken,
+        amountPaid: receipt.amountPaid,
+        issuedAt: receipt.issuedAt,
+        invoiceId: receipt.invoiceId,
+      },
+      newUserCreated,
+      generatedPassword,
+    };
+  });
+};

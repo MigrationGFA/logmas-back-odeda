@@ -2,6 +2,7 @@ import { prisma } from "../../utils/prisma";
 import { generateReceiptNumber } from "../../utils/generators";
 import fs from "fs";
 import { notify } from "../notification/notification.service";
+import { Prisma } from "@prisma/client";
 
 type UploadedFileMeta = {
   originalName: string;
@@ -18,7 +19,7 @@ interface CreateOrUpdateAppParams {
   applicantId?: string | null;
   createdById?: string | null;
   serviceId: string;
-  formData: unknown;
+  formData: Prisma.InputJsonValue;
   files?: UploadedFileMeta[];
   createInvoice?: boolean;
 }
@@ -93,7 +94,7 @@ export const createOrUpdateApplication = async (
        await tx.application.update({
         where: { id: applicationId },
         data: {
-          formData,
+          formData, // changed from `JSON`,
           status: "submitted",
         },
         include: {

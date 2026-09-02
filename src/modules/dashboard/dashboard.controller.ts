@@ -61,7 +61,7 @@ export const fetchMetricsByRole = async (
         metrics: {
           pendingPayments: pendingPaymentAmount,
           approvedApplications: statusCounts[ApplicationStatus.approved] ?? 0,
-          underReview: statusCounts[ApplicationStatus.under_review] ?? 0,
+          awaitingForm: statusCounts[ApplicationStatus.awaiting_form] ?? 0,
           submitted: statusCounts[ApplicationStatus.submitted] ?? 0,
           openComplaints: complaints,
         },

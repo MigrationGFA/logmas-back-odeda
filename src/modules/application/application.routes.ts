@@ -186,6 +186,14 @@ router.post(
   createApplication
 );
 
+router.patch(
+  "/:id/complete",
+  requireAuth,
+  uploadHandler,
+  validateDocumentTypes,
+  checkServiceDocumentTypes,
+  createApplication
+);
 
 // Admin (LGA) endpoints
 router.get('/admin', requireAuth, requireRole('lga_admin', 'super_admin'), adminListApplications);

@@ -72,7 +72,7 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
   // ── One row, created up front as "pending" for whichever channels apply ──
   const record = await prisma.notification.create({
     data: {
-      userId,
+      user: { connect: { id: userId } },
       templateKey,
       title,
       message,

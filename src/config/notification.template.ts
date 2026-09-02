@@ -121,7 +121,6 @@ export const applicationTemplates = {
 </html>`,
   },
 
-
   // Invoice Generated
   invoiceGenerated: {
     emailSubject: `Invoice Generated: {{invoice_number}} - {{service_name}}`,
@@ -186,6 +185,66 @@ export const applicationTemplates = {
     {{/if}}
     <p style="font-size: 13px; color: #6b7280;">Your certificate will be generated and made available shortly.</p>
     <a href="${BASE_URL}/dashboard/applications/{{application_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">View Application →</a>
+  </div>
+</body>
+</html>`,
+  },
+
+   completeApplication: {
+    sms: `Hello {{applicant_name}}, your payment for {{service_name}} was successful, but your application is not yet complete. Please log in at: ${BASE_URL}/login to complete your form and upload the required documents. Application #{{application_number}}.`,
+
+    emailSubject: `Complete Your Application: #{{application_number}} - {{service_name}}`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
+    <div style="background: #1a4731; padding: 32px; text-align: center;">
+      <h1 style="color: #fff; margin: 0;">Complete Your Application</h1>
+      <p style="color: #a7f3d0; margin: 4px 0 0;">LOGMAS</p>
+    </div>
+
+    <div style="padding: 32px;">
+      <p>Dear <strong>{{applicant_name}}</strong>,</p>
+
+      <p>
+        We have received your payment for
+        <strong>{{service_name}}</strong>, but your application is not yet complete.
+      </p>
+
+      <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <div style="margin-bottom: 10px;">
+          <span style="color: #6b7280;">Application Number:</span>
+          <strong style="font-family: monospace;">{{application_number}}</strong>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+          <span style="color: #6b7280;">Service:</span>
+          <strong>{{service_name}}</strong>
+        </div>
+
+        <div>
+          <span style="color: #6b7280;">Status:</span>
+          <span style="color: #f59e0b; font-weight: bold;">Awaiting Form Completion</span>
+        </div>
+      </div>
+
+      <p>
+        Please log in to your account to complete the application form and
+        upload all required supporting documents. Your application cannot be
+        submitted for review until these steps are completed.
+      </p>
+
+      <a href="${BASE_URL}/dashboard/applications/{{application_id}}"
+        style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold;">
+        Complete Application →
+      </a>
+
+      <p style="font-size: 13px; color: #6b7280; margin-top: 24px;">
+        Once you have completed the form and uploaded the required documents,
+        your application will be submitted for review.
+      </p>
+    </div>
   </div>
 </body>
 </html>`,
@@ -307,6 +366,7 @@ export const accountTemplates = {
 </body>
 </html>`,
   },
+ 
 
   // Stage 2 — Account Suspended
   accountSuspended: {
@@ -482,8 +542,8 @@ export const accountTemplates = {
 </html>`,
   },
   resendVerificationEmail: {
-  emailSubject: `New Email Verification Link — LOGMAS`,
-  emailHtml: `
+    emailSubject: `New Email Verification Link — LOGMAS`,
+    emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
@@ -541,7 +601,71 @@ export const accountTemplates = {
   </div>
 </body>
 </html>`,
-},
+  },
+
+  // Welcome — account created through the public application route
+  publicAccountCreated: {
+    sms: `Welcome to LOGMAS, {{applicant_name}}. Your account has been created after your payment for {{service_name}}. Login at: ${BASE_URL}/login to complete your application. Your temporary password is {{temp_password}}. Please change it after logging in.`,
+
+    emailSubject: `Welcome to LOGMAS — Complete Your {{service_name}} Application`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
+    <div style="background: #1a4731; padding: 32px; text-align: center;">
+      <h1 style="color: #fff; margin: 0;">Welcome to LOGMAS</h1>
+      <p style="color: #a7f3d0; margin: 4px 0 0;">Local Government Management & Service Portal</p>
+    </div>
+
+    <div style="padding: 32px;">
+      <p>Dear <strong>{{applicant_name}}</strong>,</p>
+
+      <p>
+        Your payment for <strong>{{service_name}}</strong> has been successfully received,
+        and your LOGMAS account has been created.
+      </p>
+
+      <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <div style="margin-bottom: 10px;">
+          <span style="color: #6b7280;">Service:</span>
+          <strong>{{service_name}}</strong>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+          <span style="color: #6b7280;">Amount Paid:</span>
+          <strong>₦{{fee_amount}}</strong>
+        </div>
+
+        <div>
+          <span style="color: #6b7280;">Application Number:</span>
+          <strong style="font-family: monospace;">{{application_number}}</strong>
+        </div>
+      </div>
+
+      <p>
+        Your payment is complete, but your application still needs to be completed.
+        Please log in to provide the required information and upload your supporting documents.
+      </p>
+
+      <a href="${BASE_URL}/login"
+        style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold;">
+        Login & Complete Application →
+      </a>
+
+      <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; margin-top: 24px;">
+        <p style="margin: 0; font-size: 13px; color: #92400e;">
+          <strong>Temporary Password:</strong> {{temp_password}}<br />
+          Please change your password after logging in.
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+
+  // Complete Your Application — payment has been made but form is incomplete
 };
 
 // ============================================================

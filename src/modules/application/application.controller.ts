@@ -13,24 +13,46 @@ export const createApplication = async (
   res: Response,
   next: NextFunction,
 ) => {
-  let files = undefined as Express.Multer.File[] | undefined;
+  let files: Express.Multer.File[] | undefined;
+
   try {
     const user = req.user!;
 
-    // multer will populate files as req.files (array)
     files = (req as any).files as Express.Multer.File[] | undefined;
 
-    // Build payload from multipart fields (form fields are strings). Parse formData if sent as JSON string.
     const raw = req.body || {};
-    // Ignore any feeAmount supplied by frontend
-    if ("feeAmount" in raw) delete raw.feeAmount;
+
+    // PATCH /applications/:id/complete = completion mode
+    const isCompletion = req.method === "PATCH" && !!req.params.id;
+
+    const applicationId = isCompletion
+      ? String(req.params.id)
+      : undefined;
+
+    // ------------------------------------------------------------
+    // Parse multipart form data
+    // ------------------------------------------------------------
+
+    if ("feeAmount" in raw) {
+      delete raw.feeAmount;
+    }
 
     let parsedFormData: any = raw.formData ?? {};
-    if (typeof parsedFormData === "string" && parsedFormData.length > 0) {
+
+    if (
+      typeof parsedFormData === "string" &&
+      parsedFormData.length > 0
+    ) {
       try {
         parsedFormData = JSON.parse(parsedFormData);
-      } catch (e) {
-        // leave as string if not JSON
+      } catch {
+        return sendError(
+          res,
+          "Invalid formData JSON",
+          "VALIDATION_ERROR",
+          null,
+          400,
+        );
       }
     }
 
@@ -40,19 +62,17 @@ export const createApplication = async (
       formData: parsedFormData,
     };
 
-    // Validate common application fields
     const validation = createApplicationSchema.safeParse(payload);
+
     if (!validation.success) {
-      // cleanup uploaded files if any
-      if (files && files.length) {
-        for (const f of files) {
+      if (files?.length) {
+        for (const file of files) {
           try {
-            fs.unlinkSync(path.resolve(f.path));
-          } catch (e) {
-            /* ignore */
-          }
+            fs.unlinkSync(path.resolve(file.path));
+          } catch {}
         }
       }
+
       return sendError(
         res,
         "Data validation processing failed",
@@ -61,23 +81,169 @@ export const createApplication = async (
         400,
       );
     }
-    // Validate actor permissions and applicant resolution
+
+    // ------------------------------------------------------------
+    // COMPLETE EXISTING APPLICATION
+    // ------------------------------------------------------------
+
+    if (isCompletion) {
+      const existingApplication =
+        await prisma.application.findUnique({
+          where: {
+            id: applicationId!,
+          },
+          select: {
+            id: true,
+            applicantId: true,
+            serviceId: true,
+            paymentFirst: true,
+            status: true,
+          },
+        });
+
+      if (!existingApplication) {
+        return sendError(
+          res,
+          "Application not found",
+          "NOT_FOUND",
+          null,
+          404,
+        );
+      }
+
+      // Applicant must own the application.
+      if (
+        existingApplication.applicantId &&
+        existingApplication.applicantId !== user.id
+      ) {
+        return sendError(
+          res,
+          "You are not allowed to complete this application",
+          "FORBIDDEN",
+          null,
+          403,
+        );
+      }
+
+      // Frontend must use the same service.
+      if (
+        existingApplication.serviceId !== validation.data.serviceId
+      ) {
+        return sendError(
+          res,
+          "The selected service does not match this application",
+          "VALIDATION_ERROR",
+          null,
+          400,
+        );
+      }
+
+      // This endpoint is specifically for payment-first applications.
+      // if (!existingApplication.paymentFirst) {
+      //   return sendError(
+      //     res,
+      //     "This application is not a payment-first application",
+      //     "BAD_REQUEST",
+      //     null,
+      //     400,
+      //   );
+      // }
+
+      // ----------------------------------------------------------
+      // Prepare uploaded file metadata
+      // ----------------------------------------------------------
+
+      const serverUrl = `${req.protocol}://${req.get("host")}`;
+
+      const filesMeta = (files || []).map((file) => {
+        const normalizedRelativePath = file.path.replace(
+          /\\/g,
+          "/",
+        );
+
+        return {
+          originalName: file.originalname,
+          fileName: file.filename,
+          relativePath: normalizedRelativePath,
+          url: `${serverUrl}/${normalizedRelativePath}`,
+          documentType: file.fieldname,
+        } as any;
+      });
+
+      const result =
+        await ApplicationService.createOrUpdateApplication({
+          mode: "complete",
+          applicationId: applicationId!,
+          applicantId:
+            existingApplication.applicantId ?? undefined,
+          serviceId: validation.data.serviceId,
+          formData: validation.data.formData,
+          files: filesMeta,
+          createInvoice: false,
+        });
+
+      const application = result.application;
+
+      // ----------------------------------------------------------
+      // Notification
+      // ----------------------------------------------------------
+
+      if (application?.applicant) {
+        try {
+          const fullName =
+            `${application.applicant.firstName} ${application.applicant.lastName}`;
+
+          await notify({
+            userId: application.applicantId,
+            to: {
+              email: application.applicant.email,
+              phone: application.applicant.phone ?? "",
+            },
+            templateKey: "application.applicationSubmitted",
+            vars: {
+              applicant_name: fullName,
+              application_number:
+                application.applicationNumber,
+              service_name: application.service.name,
+              application_id: application.id,
+              fee_amount:
+                application.feeAmount.toString(),
+            },
+            channels: ["email", "sms"],
+          });
+        } catch (notifyErr) {
+          console.error(
+            "[completeApplication] notify() failed, continuing:",
+            notifyErr,
+          );
+        }
+      }
+
+      return sendSuccess(
+        res,
+        result,
+        null,
+        200,
+      );
+    }
+
+    // ============================================================
+    // NORMAL CREATE APPLICATION
+    // ============================================================
+
     const actorRole = user.role;
+
     let applicantIdToUse: string | null = null;
     let createdById: string = user.id;
 
-    if (actorRole === "citizen" || actorRole === "business_owner") {
-      // citizens/business owners must be the applicant
-      if (raw.applicantId && raw.applicantId !== user.id) {
-        if (files && files.length) {
-          for (const f of files) {
-            try {
-              fs.unlinkSync(path.resolve(f.path));
-            } catch (e) {
-              /* ignore */
-            }
-          }
-        }
+    if (
+      actorRole === "citizen" ||
+      actorRole === "business_owner"
+    ) {
+      if (
+        raw.applicantId &&
+        raw.applicantId !== user.id
+      ) {
         return sendError(
           res,
           "You cannot submit an application on behalf of another applicant",
@@ -86,26 +252,22 @@ export const createApplication = async (
           403,
         );
       }
+
       applicantIdToUse = user.id;
       createdById = user.id;
     } else if (actorRole === "field_officer") {
-      // Field officers may optionally provide applicantId; otherwise applicantId remains null
       if (raw.applicantId) {
-        // validate user exists and is citizen or business_owner
         const target = await prisma.user.findUnique({
-          where: { id: String(raw.applicantId) },
-          select: { id: true, role: true },
+          where: {
+            id: String(raw.applicantId),
+          },
+          select: {
+            id: true,
+            role: true,
+          },
         });
+
         if (!target) {
-          if (files && files.length) {
-            for (const f of files) {
-              try {
-                fs.unlinkSync(path.resolve(f.path));
-              } catch (e) {
-                /* ignore */
-              }
-            }
-          }
           return sendError(
             res,
             "Supplied applicantId not found",
@@ -114,16 +276,11 @@ export const createApplication = async (
             404,
           );
         }
-        if (!(target.role === "citizen" || target.role === "business_owner")) {
-          if (files && files.length) {
-            for (const f of files) {
-              try {
-                fs.unlinkSync(path.resolve(f.path));
-              } catch (e) {
-                /* ignore */
-              }
-            }
-          }
+
+        if (
+          target.role !== "citizen" &&
+          target.role !== "business_owner"
+        ) {
           return sendError(
             res,
             "Field officers may only create applications for citizens or business owners",
@@ -132,22 +289,12 @@ export const createApplication = async (
             400,
           );
         }
+
         applicantIdToUse = target.id;
-      } else {
-        applicantIdToUse = null;
       }
+
       createdById = user.id;
     } else {
-      // other roles are not allowed to create applications
-      if (files && files.length) {
-        for (const f of files) {
-          try {
-            fs.unlinkSync(path.resolve(f.path));
-          } catch (e) {
-            /* ignore */
-          }
-        }
-      }
       return sendError(
         res,
         "You are not allowed to create applications",
@@ -157,55 +304,51 @@ export const createApplication = async (
       );
     }
 
-    // Validate uploaded files: document type is taken from each file's fieldname
-    if (files && files.length > 0) {
-      // Prevent duplicate document types in submission
+    // ------------------------------------------------------------
+    // Validate uploaded documents
+    // ------------------------------------------------------------
+
+    if (files?.length) {
       const seen = new Set<string>();
-      for (const f of files) {
-        const dt = f.fieldname;
-        if (seen.has(dt)) {
-          // cleanup
-          for (const ff of files) {
-            try {
-              fs.unlinkSync(path.resolve(ff.path));
-            } catch (e) {
-              /* ignore */
-            }
-          }
+
+      for (const file of files) {
+        const documentType = file.fieldname;
+
+        if (seen.has(documentType)) {
           return sendError(
             res,
-            `Duplicate document type uploaded: ${dt}`,
+            `Duplicate document type uploaded: ${documentType}`,
             "VALIDATION_ERROR",
             null,
             400,
           );
         }
-        seen.add(dt);
+
+        seen.add(documentType);
       }
 
-      // If service defines required document keys, validate fieldnames against that list
-      const svc = await prisma.service.findUnique({
-        where: { id: validation.data.serviceId },
-        select: { id: true, isActive: true, requirements: true },
+      const service = await prisma.service.findUnique({
+        where: {
+          id: validation.data.serviceId,
+        },
+        select: {
+          id: true,
+          isActive: true,
+          requirements: true,
+        },
       });
-      if (!svc) {
-        for (const ff of files) {
-          try {
-            fs.unlinkSync(path.resolve(ff.path));
-          } catch (e) {
-            /* ignore */
-          }
-        }
-        return sendError(res, "Service not found", "NOT_FOUND", null, 404);
+
+      if (!service) {
+        return sendError(
+          res,
+          "Service not found",
+          "NOT_FOUND",
+          null,
+          404,
+        );
       }
-      if (!svc.isActive) {
-        for (const ff of files) {
-          try {
-            fs.unlinkSync(path.resolve(ff.path));
-          } catch (e) {
-            /* ignore */
-          }
-        }
+
+      if (!service.isActive) {
         return sendError(
           res,
           "Service is not active",
@@ -216,22 +359,15 @@ export const createApplication = async (
       }
 
       if (
-        svc.requirements &&
-        Array.isArray(svc.requirements) &&
-        svc.requirements.length > 0
+        Array.isArray(service.requirements) &&
+        service.requirements.length > 0
       ) {
-        // Service.requirements represents REQUIRED document keys
-        const missing = svc.requirements.filter(
-          (reqKey: string) => !seen.has(reqKey),
+        const missing = service.requirements.filter(
+          (requiredDocument: string) =>
+            !seen.has(requiredDocument),
         );
+
         if (missing.length > 0) {
-          for (const ff of files) {
-            try {
-              fs.unlinkSync(path.resolve(ff.path));
-            } catch (e) {
-              /* ignore */
-            }
-          }
           return sendError(
             res,
             `Missing required documents: ${missing.join(", ")}`,
@@ -240,18 +376,13 @@ export const createApplication = async (
             400,
           );
         }
-        // Also check for any uploaded fields that are not allowed by requirements
+
         const invalid = Array.from(seen).filter(
-          (dt) => !svc.requirements.includes(dt),
+          (documentType) =>
+            !service.requirements.includes(documentType),
         );
+
         if (invalid.length > 0) {
-          for (const ff of files) {
-            try {
-              fs.unlinkSync(path.resolve(ff.path));
-            } catch (e) {
-              /* ignore */
-            }
-          }
           return sendError(
             res,
             `Invalid document types for this service: ${invalid.join(", ")}`,
@@ -263,67 +394,90 @@ export const createApplication = async (
       }
     }
 
-    // Prepare file metadata for service
+    // ------------------------------------------------------------
+    // Prepare files
+    // ------------------------------------------------------------
+
     const serverUrl = `${req.protocol}://${req.get("host")}`;
-    const filesMeta = (files || []).map((f) => {
-      const normalizedRelativePath = f.path.replace(/\\/g, "/");
+
+    const filesMeta = (files || []).map((file) => {
+      const normalizedRelativePath = file.path.replace(
+        /\\/g,
+        "/",
+      );
+
       return {
-        originalName: f.originalname,
-        fileName: f.filename,
+        originalName: file.originalname,
+        fileName: file.filename,
         relativePath: normalizedRelativePath,
         url: `${serverUrl}/${normalizedRelativePath}`,
-        documentType: f.fieldname,
+        documentType: file.fieldname,
       } as any;
     });
 
-    const result = await ApplicationService.createApplication({
-      applicantId: applicantIdToUse ?? undefined,
-      createdById: createdById,
-      serviceId: validation.data.serviceId,
-      formData: validation.data.formData,
-      files: filesMeta,
-    } as any);
+    // ------------------------------------------------------------
+    // CREATE
+    // ------------------------------------------------------------
 
-    const {application} = result
-
-     try {
-      const fullName = `${application.applicant.firstName} ${application.applicant.lastName}`;
-      await notify({
-        userId: application.applicantId,
-        to: {
-          email: application.applicant.email,
-          phone: application.applicant.phone ?? "",
-        },
-        templateKey: "application.applicationSubmitted",
-        vars: {
-          applicant_name: fullName,
-          application_number: application.applicationNumber,
-          service_name: application.service.name,
-          application_id: application.id,
-          fee_amount: application.feeAmount.toString(),
-        },
-        channels: ["email", "sms"],
+    const result =
+      await ApplicationService.createOrUpdateApplication({
+        mode: "create",
+        applicantId: applicantIdToUse ?? undefined,
+        createdById,
+        serviceId: validation.data.serviceId,
+        formData: validation.data.formData,
+        files: filesMeta,
+        createInvoice: true,
       });
-    } catch (notifyErr) {
-      console.error(
-        "[createApplication] notify() failed, continuing anyway:",
-        notifyErr,
-      );
-    }
 
-    return sendSuccess(res, result, null, 201);
-  } catch (err: any) {
-    // Cleanup uploaded files on failure
-    if (files && files.length) {
-      for (const f of files) {
-        try {
-          fs.unlinkSync(path.resolve(f.path));
-        } catch (e) {
-          /* ignore */
-        }
+    const application = result.application;
+
+    if (application?.applicant) {
+      try {
+        const fullName =
+          `${application.applicant.firstName} ${application.applicant.lastName}`;
+
+        await notify({
+          userId: application.applicantId,
+          to: {
+            email: application.applicant.email,
+            phone: application.applicant.phone ?? "",
+          },
+          templateKey: "application.applicationSubmitted",
+          vars: {
+            applicant_name: fullName,
+            application_number:
+              application.applicationNumber,
+            service_name: application.service.name,
+            application_id: application.id,
+            fee_amount:
+              application.feeAmount.toString(),
+          },
+          channels: ["email", "sms"],
+        });
+      } catch (notifyErr) {
+        console.error(
+          "[createApplication] notify() failed, continuing:",
+          notifyErr,
+        );
       }
     }
-    // Known operational errors are forwarded to centralized error handler by throwing
+
+    return sendSuccess(
+      res,
+      result,
+      null,
+      201,
+    );
+  } catch (err: any) {
+    if (files?.length) {
+      for (const file of files) {
+        try {
+          fs.unlinkSync(path.resolve(file.path));
+        } catch {}
+      }
+    }
+
     return next(err);
   }
 };

@@ -55,11 +55,7 @@ export const register = async (
         emailVerificationTokenExpiresAt: verificationExpiresAt,
       },
     });
-    // TODO:
-    // Generate email verification token
-    // Store hashed token
-    // Send verification email
-
+    
     const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
 
     await prisma.auditLog.create({
@@ -142,6 +138,16 @@ export const login = async (
         "SUSPENDED",
         null,
         403,
+      );
+    }
+
+    if(!user.emailVerifiedAt &&( user.role === "citizen" || user.role === "business_owner")) {
+      return sendError(
+        res,
+        "Email not verified. Please verify your email before signing in.",
+        "UNAUTHORIZED",
+        null,
+        401,
       );
     }
 

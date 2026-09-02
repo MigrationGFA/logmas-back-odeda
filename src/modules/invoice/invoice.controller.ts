@@ -75,11 +75,17 @@ export const fetchInvoicesHubData = async ({
   // Payment status filter
   // ---------------------------------------------------------
   if (tab && tab !== "all") {
-    if (tab === "unpaid") {
+    if (tab === "pending") {
       where.paymentStatus = {
         in: ["pending"],
       };
-    } else {
+    } 
+    else if(tab === "confirmed"){
+       where.paymentStatus = {
+        in: ["confirmed"],
+      };
+    }
+    else {
       where.paymentStatus = "failed";
     }
   }

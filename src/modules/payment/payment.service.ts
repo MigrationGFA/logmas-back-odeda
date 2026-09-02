@@ -9,6 +9,7 @@ import {
 } from "../../utils/generators";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { notify } from "../notification/notification.service";
 
 interface ConfirmPaymentParams {
   invoiceId: string;
@@ -269,7 +270,7 @@ export const completeNewApplicationAfterPayment = async ({
   gatewayRef,
   metadata,
 }: NewApplicationPaymentParams) => {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // --------------------------------------------------
     // 1. IDEMPOTENCY CHECK
     // --------------------------------------------------
@@ -294,14 +295,16 @@ export const completeNewApplicationAfterPayment = async ({
         applicationId: existingPayment.invoice?.application?.id ?? null,
         invoiceId: existingPayment.invoiceId ?? null,
         paymentId: existingPayment.id,
-        receiptId: await tx.receipt.findUnique({
-          where: {
-            invoiceId: existingPayment.invoiceId,
-          },
-          select: {
-            id: true,
-          },
-        }).then(receipt => receipt?.id ?? null),
+        receiptId: await tx.receipt
+          .findUnique({
+            where: {
+              invoiceId: existingPayment.invoiceId,
+            },
+            select: {
+              id: true,
+            },
+          })
+          .then((receipt) => receipt?.id ?? null),
         userId: existingPayment.invoice?.application?.applicantId ?? null,
         newUserCreated: false,
       };
@@ -346,6 +349,7 @@ export const completeNewApplicationAfterPayment = async ({
           role: "citizen",
           passwordResetRequired: true,
           onboardingCompleted: false,
+          emailVerifiedAt: new Date(),
         },
         select: {
           id: true,
@@ -409,7 +413,7 @@ export const completeNewApplicationAfterPayment = async ({
         },
         feeAmount,
         formData: {},
-        status: "draft",
+        status: "awaiting_form",
       },
       select: {
         id: true,
@@ -419,8 +423,14 @@ export const completeNewApplicationAfterPayment = async ({
         createdAt: true,
         serviceId: true,
         applicantId: true,
+        service:{
+          select:{
+            name:true
+          }
+        }
       },
     });
+
 
     // --------------------------------------------------
     // 5. CREATE INVOICE
@@ -530,6 +540,7 @@ export const completeNewApplicationAfterPayment = async ({
         createdAt: application.createdAt,
         serviceId: application.serviceId,
         applicantId: application.applicantId,
+        serviceName: application.service?.name ?? "",
       },
       invoice: {
         id: invoice.id,
@@ -562,4 +573,63 @@ export const completeNewApplicationAfterPayment = async ({
       generatedPassword,
     };
   });
+
+  if (!result.alreadyProcessed && result.user) {
+  const fullName =
+    `${result.user.firstName} ${result.user.lastName}`.trim();
+
+  if (result.newUserCreated) {
+    try {
+      await notify({
+        userId: result.user.id,
+        to: {
+          email: result.user.email,
+          phone: metadata.phone?.trim() ?? "",
+        },
+        templateKey: "account.publicAccountCreated",
+        vars: {
+          applicant_name: fullName,
+          application_number: result.application.applicationNumber,
+         service_name: result.application.serviceName,
+          application_id: result.application.id,
+          fee_amount: result.application.feeAmount.toString(),
+          temp_password: result.generatedPassword,
+        },
+        channels: ["email", "sms"],
+      });
+    } catch (notifyErr) {
+      console.error(
+        "[completeNewApplicationAfterPayment] account notification failed, continuing:",
+        notifyErr,
+      );
+    }
+  }
+
+  try {
+    await notify({
+      userId: result.user.id,
+      to: {
+        email: result.user.email,
+        phone: metadata.phone?.trim() ?? "",
+      },
+      templateKey: "application.completeApplication",
+      vars: {
+        applicant_name: fullName,
+        application_number: result.application.applicationNumber,
+       service_name: result.application.serviceName,
+        application_id: result.application.id,
+      },
+      channels: ["email", "sms"],
+    });
+  } catch (notifyErr) {
+    console.error(
+      "[completeNewApplicationAfterPayment] completion notification failed, continuing:",
+      notifyErr,
+    );
+  }
+}
+
+return result;
+
+  return result
 };

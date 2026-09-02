@@ -235,7 +235,7 @@ export const applicationTemplates = {
         submitted for review until these steps are completed.
       </p>
 
-      <a href="${BASE_URL}/dashboard/applications/{{application_id}}"
+      <a href="${BASE_URL}/dashboard/applications/{{application_id}}" target="_blank"
         style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold;">
         Complete Application →
       </a>

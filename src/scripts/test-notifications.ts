@@ -8,6 +8,8 @@
 // (make sure your .env is loaded — add `import "dotenv/config";` at the top if you
 // don't already load env vars elsewhere, and `npm install -D ts-node` if needed)
 
+// node dist/scripts/test-notifications.js
+
 import "dotenv/config";
 import { sendEmail, verifyConnection } from "../modules/notification/email.service";
 import { sendSms } from "../modules/notification/sms.service";
@@ -15,6 +17,7 @@ import { interpolate, NotificationTemplates } from "../config/notification.templ
 
 const TEST_PHONE = "+2348130822299";
 const TEST_EMAIL = "evans@joemarineng.com";
+
 
 async function main() {
   console.log("=== 1. Verifying SMTP connection ===");

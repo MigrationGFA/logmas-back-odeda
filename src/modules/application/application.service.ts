@@ -50,6 +50,11 @@ export const createOrUpdateApplication = async (
         throw err;
       }
 
+      console.log("COMPLETE files:", files?.length);
+      console.log(
+        "COMPLETE file fields:✅",
+        files
+      );
       const application = await tx.application.findUnique({
         where: { id: applicationId },
         include: {
@@ -91,7 +96,7 @@ export const createOrUpdateApplication = async (
       }
 
       // Update the actual application.
-       await tx.application.update({
+      await tx.application.update({
         where: { id: applicationId },
         data: {
           formData, // changed from `JSON`,
@@ -108,13 +113,12 @@ export const createOrUpdateApplication = async (
       // Replace uploaded documents by documentType.
       if (files && files.length > 0) {
         for (const file of files) {
-          const existingDocument =
-            await tx.applicationDocument.findFirst({
-              where: {
-                applicationId,
-                documentType: file.documentType ?? "supporting_document",
-              },
-            });
+          const existingDocument = await tx.applicationDocument.findFirst({
+            where: {
+              applicationId,
+              documentType: file.documentType ?? "supporting_document",
+            },
+          });
 
           if (existingDocument) {
             await tx.applicationDocument.update({
@@ -131,8 +135,7 @@ export const createOrUpdateApplication = async (
             await tx.applicationDocument.create({
               data: {
                 applicationId,
-                documentType:
-                  file.documentType ?? "supporting_document",
+                documentType: file.documentType ?? "supporting_document",
                 originalName: file.originalName,
                 fileName: file.fileName,
                 url: file.url,
@@ -267,8 +270,7 @@ export const createOrUpdateApplication = async (
         await tx.applicationDocument.create({
           data: {
             applicationId: application.id,
-            documentType:
-              file.documentType ?? "supporting_document",
+            documentType: file.documentType ?? "supporting_document",
             originalName: file.originalName,
             fileName: file.fileName,
             url: file.url,
@@ -310,41 +312,6 @@ export const getApplicationByIdOrNumber = async (idOrNumber: string) => {
   });
   return app;
 };
-
-// export const listApplicationsForUser = async (
-//   user: any,
-//   page = 1,
-//   limit = 25,
-// ) => {
-//   const skip = (page - 1) * limit;
-//   const where: any = {};
-
-//   if (user.role === "citizen" || user.role === "business_owner") {
-//     where.applicantId = user.id;
-//   } else if (user.role === "field_officer") {
-//     // Field officers see applications they created
-//     where.createdById = user.id;
-//   }
-
-//   const items = await prisma.application.findMany({
-//     where,
-//     include: {
-//       service: true,
-//       invoice: true,
-//       certificate: true,
-//       applicationDocuments: true,
-//       applicant:true
-//     },
-//     orderBy: { createdAt: "desc" },
-//     skip,
-//     take: limit,
-//   });
-
-//   const total = await prisma.application.count({ where });
-
-//   return { items, meta: { total, page, limit } };
-// };
-
 
 export const listApplicationsForUser = async (
   user: any,
@@ -402,21 +369,21 @@ export const listApplicationsForUser = async (
           virtualAccountNumber: true,
           virtualBankName: true,
           payments: {
-            select:{
-              method:true
-            }
-          }
+            select: {
+              method: true,
+            },
+          },
         },
       },
       certificate: {
         select: {
           id: true,
           certificateNumber: true,
-          verificationCode:true,
+          verificationCode: true,
           issuedAt: true,
           expiresAt: true,
           pdfUrl: true,
-          issuedBy:true
+          issuedBy: true,
         },
       },
       applicationDocuments: {
@@ -472,7 +439,6 @@ export const listApplicationsForUser = async (
   });
 
   const total = await prisma.application.count({ where });
-
 
   return {
     items,

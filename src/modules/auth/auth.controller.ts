@@ -414,7 +414,7 @@ export const updateUserProfile = async (
 
     // Validate string fields
     for (const [key, value] of Object.entries(stringFields)) {
-      if (value !== undefined && typeof value !== "string") {
+      if (value !== undefined && value !== null && typeof value !== "string") {
         return sendError(
           res,
           `${key} must be a valid string`,
@@ -557,7 +557,14 @@ export const updateUserProfile = async (
     
     // Handle phone specially (can be null)
     if (phone !== undefined) {
-      updateData.phone = phone.trim() !== "" ? phone.trim() : null;
+      updateData.phone = phone === null || phone === "" ? null : phone.trim();
+    }
+
+
+    // Only include avatarUrl when the frontend actually sends it.
+    // This avoids crashes when the field is omitted and preserves null/empty as clearable values.
+    if (avatarUrl !== undefined) {
+      updateData.avatarUrl = avatarUrl === null || avatarUrl === "" ? null : avatarUrl.trim();
     }
     
     // Email is usually not updated here, but include if provided
@@ -569,7 +576,7 @@ export const updateUserProfile = async (
     // addStringField("ward", ward);
     addStringField("gender", gender);
     addStringField("emergencyContact", emergencyContact);
-    addStringField("avatarUrl", avatarUrl);
+    // addStringField("avatarUrl", avatarUrl);
     addStringField("passportPhoto", passportPhoto);
     
     // Citizen fields

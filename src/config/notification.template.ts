@@ -42,6 +42,76 @@ export const applicationTemplates = {
 </body>
 </html>`,
   },
+  applicationCompleteYourForm: {
+    sms: `Hello {{applicant_name}}, your payment for {{service_name}} was successful. Your application (#{{application_number}}) is awaiting form completion. Please log in to ${BASE_URL}/login to complete your application and upload the required documents.`,
+
+    emailSubject: `Complete Your Application: #{{application_number}} - {{service_name}}`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px;">
+
+    <h2>Complete Your Application</h2>
+
+    <p>Dear {{applicant_name}},</p>
+
+    <p>
+      Your payment for <strong>{{service_name}}</strong> has been successfully received.
+      Your application has been created, but there are a few more steps to complete before
+      it can be submitted for review.
+    </p>
+
+    <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 8px;">
+        <span style="color: #6b7280;">Application Number:</span>
+        <strong style="font-family: monospace;">{{application_number}}</strong>
+      </div>
+
+      <div style="margin-bottom: 8px;">
+        <span style="color: #6b7280;">Service:</span>
+        {{service_name}}
+      </div>
+
+      <div style="margin-bottom: 8px;">
+        <span style="color: #6b7280;">Amount Paid:</span>
+        <strong>₦{{fee_amount}}</strong>
+      </div>
+
+      <div>
+        <span style="color: #6b7280;">Status:</span>
+        <span style="color: #f59e0b; font-weight: bold;">
+          Awaiting Form Completion
+        </span>
+      </div>
+    </div>
+
+    <p>
+      Please log in to your LOGMAS account to complete your application form
+      and upload all required supporting documents.
+    </p>
+
+    <p>
+      Once you complete the form and submit your application, it will be sent
+      to the appropriate Local Government authority for review.
+    </p>
+
+    <a
+      href="${BASE_URL}/dashboard/applications/{{application_id}}"
+      style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;"
+    >
+      Complete Application →
+    </a>
+
+    <p style="font-size: 13px; color: #6b7280; margin-top: 24px;">
+      You have already completed the payment step. No additional payment is required
+      to complete this application.
+    </p>
+
+  </div>
+</body>
+</html>`,
+  },
 
   // Application Approved
   applicationApproved: {
@@ -190,7 +260,7 @@ export const applicationTemplates = {
 </html>`,
   },
 
-   completeApplication: {
+  completeApplication: {
     sms: `Hello {{applicant_name}}, your payment for {{service_name}} was successful, but your application is not yet complete. Please log in at: ${BASE_URL}/login to complete your form and upload the required documents. Application #{{application_number}}.`,
 
     emailSubject: `Complete Your Application: #{{application_number}} - {{service_name}}`,
@@ -235,7 +305,7 @@ export const applicationTemplates = {
         submitted for review until these steps are completed.
       </p>
 
-      <a href="${BASE_URL}/dashboard/applications/{{application_id}}" target="_blank"
+      <a href="${BASE_URL}/dashboard/applications" target="_blank"
         style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold;">
         Complete Application →
       </a>
@@ -366,7 +436,6 @@ export const accountTemplates = {
 </body>
 </html>`,
   },
- 
 
   // Stage 2 — Account Suspended
   accountSuspended: {

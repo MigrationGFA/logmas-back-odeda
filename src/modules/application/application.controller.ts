@@ -25,9 +25,7 @@ export const createApplication = async (
     // PATCH /applications/:id/complete = completion mode
     const isCompletion = req.method === "PATCH" && !!req.params.id;
 
-    const applicationId = isCompletion
-      ? String(req.params.id)
-      : undefined;
+    const applicationId = isCompletion ? String(req.params.id) : undefined;
 
     // ------------------------------------------------------------
     // Parse multipart form data
@@ -39,10 +37,7 @@ export const createApplication = async (
 
     let parsedFormData: any = raw.formData ?? {};
 
-    if (
-      typeof parsedFormData === "string" &&
-      parsedFormData.length > 0
-    ) {
+    if (typeof parsedFormData === "string" && parsedFormData.length > 0) {
       try {
         parsedFormData = JSON.parse(parsedFormData);
       } catch {
@@ -83,226 +78,22 @@ export const createApplication = async (
     }
 
     // ------------------------------------------------------------
-    // COMPLETE EXISTING APPLICATION
+    // Prepare files
     // ------------------------------------------------------------
 
-    if (isCompletion) {
-      const existingApplication =
-        await prisma.application.findUnique({
-          where: {
-            id: applicationId!,
-          },
-          select: {
-            id: true,
-            applicantId: true,
-            serviceId: true,
-            paymentFirst: true,
-            status: true,
-          },
-        });
+    const serverUrl = `${req.protocol}://${req.get("host")}`;
 
-      if (!existingApplication) {
-        return sendError(
-          res,
-          "Application not found",
-          "NOT_FOUND",
-          null,
-          404,
-        );
-      }
+    const filesMeta = (files || []).map((file) => {
+      const normalizedRelativePath = file.path.replace(/\\/g, "/");
 
-      // Applicant must own the application.
-      if (
-        existingApplication.applicantId &&
-        existingApplication.applicantId !== user.id
-      ) {
-        return sendError(
-          res,
-          "You are not allowed to complete this application",
-          "FORBIDDEN",
-          null,
-          403,
-        );
-      }
-
-      // Frontend must use the same service.
-      if (
-        existingApplication.serviceId !== validation.data.serviceId
-      ) {
-        return sendError(
-          res,
-          "The selected service does not match this application",
-          "VALIDATION_ERROR",
-          null,
-          400,
-        );
-      }
-
-      // This endpoint is specifically for payment-first applications.
-      // if (!existingApplication.paymentFirst) {
-      //   return sendError(
-      //     res,
-      //     "This application is not a payment-first application",
-      //     "BAD_REQUEST",
-      //     null,
-      //     400,
-      //   );
-      // }
-
-      // ----------------------------------------------------------
-      // Prepare uploaded file metadata
-      // ----------------------------------------------------------
-
-      const serverUrl = `${req.protocol}://${req.get("host")}`;
-
-      const filesMeta = (files || []).map((file) => {
-        const normalizedRelativePath = file.path.replace(
-          /\\/g,
-          "/",
-        );
-
-        return {
-          originalName: file.originalname,
-          fileName: file.filename,
-          relativePath: normalizedRelativePath,
-          url: `${serverUrl}/${normalizedRelativePath}`,
-          documentType: file.fieldname,
-        } as any;
-      });
-
-      const result =
-        await ApplicationService.createOrUpdateApplication({
-          mode: "complete",
-          applicationId: applicationId!,
-          applicantId:
-            existingApplication.applicantId ?? undefined,
-          serviceId: validation.data.serviceId,
-          formData: validation.data.formData,
-          files: filesMeta,
-          createInvoice: false,
-        });
-
-      const application = result.application;
-
-      // ----------------------------------------------------------
-      // Notification
-      // ----------------------------------------------------------
-
-      if (application?.applicant) {
-        try {
-          const fullName =
-            `${application.applicant.firstName} ${application.applicant.lastName}`;
-
-          await notify({
-            userId: application.applicantId,
-            to: {
-              email: application.applicant.email,
-              phone: application.applicant.phone ?? "",
-            },
-            templateKey: "application.applicationSubmitted",
-            vars: {
-              applicant_name: fullName,
-              application_number:
-                application.applicationNumber,
-              service_name: application.service.name,
-              application_id: application.id,
-              fee_amount:
-                application.feeAmount.toString(),
-            },
-            channels: ["email", "sms"],
-          });
-        } catch (notifyErr) {
-          console.error(
-            "[completeApplication] notify() failed, continuing:",
-            notifyErr,
-          );
-        }
-      }
-
-      return sendSuccess(
-        res,
-        result,
-        null,
-        200,
-      );
-    }
-
-    // ============================================================
-    // NORMAL CREATE APPLICATION
-    // ============================================================
-
-    const actorRole = user.role;
-
-    let applicantIdToUse: string | null = null;
-    let createdById: string = user.id;
-
-    if (
-      actorRole === "citizen" ||
-      actorRole === "business_owner"
-    ) {
-      if (
-        raw.applicantId &&
-        raw.applicantId !== user.id
-      ) {
-        return sendError(
-          res,
-          "You cannot submit an application on behalf of another applicant",
-          "FORBIDDEN",
-          null,
-          403,
-        );
-      }
-
-      applicantIdToUse = user.id;
-      createdById = user.id;
-    } else if (actorRole === "field_officer") {
-      if (raw.applicantId) {
-        const target = await prisma.user.findUnique({
-          where: {
-            id: String(raw.applicantId),
-          },
-          select: {
-            id: true,
-            role: true,
-          },
-        });
-
-        if (!target) {
-          return sendError(
-            res,
-            "Supplied applicantId not found",
-            "NOT_FOUND",
-            null,
-            404,
-          );
-        }
-
-        if (
-          target.role !== "citizen" &&
-          target.role !== "business_owner"
-        ) {
-          return sendError(
-            res,
-            "Field officers may only create applications for citizens or business owners",
-            "VALIDATION_ERROR",
-            null,
-            400,
-          );
-        }
-
-        applicantIdToUse = target.id;
-      }
-
-      createdById = user.id;
-    } else {
-      return sendError(
-        res,
-        "You are not allowed to create applications",
-        "FORBIDDEN",
-        null,
-        403,
-      );
-    }
+      return {
+        originalName: file.originalname,
+        fileName: file.filename,
+        relativePath: normalizedRelativePath,
+        url: `${serverUrl}/${normalizedRelativePath}`,
+        documentType: file.fieldname,
+      } as any;
+    });
 
     // ------------------------------------------------------------
     // Validate uploaded documents
@@ -339,13 +130,7 @@ export const createApplication = async (
       });
 
       if (!service) {
-        return sendError(
-          res,
-          "Service not found",
-          "NOT_FOUND",
-          null,
-          404,
-        );
+        return sendError(res, "Service not found", "NOT_FOUND", null, 404);
       }
 
       if (!service.isActive) {
@@ -363,8 +148,7 @@ export const createApplication = async (
         service.requirements.length > 0
       ) {
         const missing = service.requirements.filter(
-          (requiredDocument: string) =>
-            !seen.has(requiredDocument),
+          (requiredDocument: string) => !seen.has(requiredDocument),
         );
 
         if (missing.length > 0) {
@@ -378,8 +162,7 @@ export const createApplication = async (
         }
 
         const invalid = Array.from(seen).filter(
-          (documentType) =>
-            !service.requirements.includes(documentType),
+          (documentType) => !service.requirements.includes(documentType),
         );
 
         if (invalid.length > 0) {
@@ -395,47 +178,186 @@ export const createApplication = async (
     }
 
     // ------------------------------------------------------------
-    // Prepare files
+    // COMPLETE EXISTING APPLICATION
     // ------------------------------------------------------------
 
-    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    if (isCompletion) {
+      const existingApplication = await prisma.application.findUnique({
+        where: {
+          id: applicationId!,
+        },
+        select: {
+          id: true,
+          applicantId: true,
+          serviceId: true,
+          paymentFirst: true,
+          status: true,
+        },
+      });
 
-    const filesMeta = (files || []).map((file) => {
-      const normalizedRelativePath = file.path.replace(
-        /\\/g,
-        "/",
+      if (!existingApplication) {
+        return sendError(res, "Application not found", "NOT_FOUND", null, 404);
+      }
+
+      // Applicant must own the application.
+      if (
+        existingApplication.applicantId &&
+        existingApplication.applicantId !== user.id
+      ) {
+        return sendError(
+          res,
+          "You are not allowed to complete this application",
+          "FORBIDDEN",
+          null,
+          403,
+        );
+      }
+
+      // Frontend must use the same service.
+      if (existingApplication.serviceId !== validation.data.serviceId) {
+        return sendError(
+          res,
+          "The selected service does not match this application",
+          "VALIDATION_ERROR",
+          null,
+          400,
+        );
+      }
+
+      const result = await ApplicationService.createOrUpdateApplication({
+        mode: "complete",
+        applicationId: applicationId!,
+        applicantId: existingApplication.applicantId ?? undefined,
+        serviceId: validation.data.serviceId,
+        formData: validation.data.formData,
+        files: filesMeta,
+        createInvoice: false,
+      });
+
+      const application = result.application;
+
+      // ----------------------------------------------------------
+      // Notification
+      // ----------------------------------------------------------
+
+      // if (application?.applicant) {
+      //   try {
+      //     const fullName = `${application.applicant.firstName} ${application.applicant.lastName}`;
+
+      //     await notify({
+      //       userId: application.applicantId,
+      //       to: {
+      //         email: application.applicant.email,
+      //         phone: application.applicant.phone ?? "",
+      //       },
+      //       templateKey: "application.applicationCompleteYourForm",
+      //       vars: {
+      //         applicant_name: fullName,
+      //         application_number: application.applicationNumber,
+      //         service_name: application.service.name,
+      //         application_id: application.id,
+      //         fee_amount: application.feeAmount.toString(),
+      //       },
+      //       channels: ["email", "sms"],
+      //     });
+      //   } catch (notifyErr) {
+      //     console.error(
+      //       "[completeApplication] notify() failed, continuing:",
+      //       notifyErr,
+      //     );
+      //   }
+      // }
+
+      return sendSuccess(res, result, null, 200);
+    }
+
+    // ============================================================
+    // NORMAL CREATE APPLICATION
+    // ============================================================
+
+    const actorRole = user.role;
+
+    let applicantIdToUse: string | null = null;
+    let createdById: string = user.id;
+
+    if (actorRole === "citizen" || actorRole === "business_owner") {
+      if (raw.applicantId && raw.applicantId !== user.id) {
+        return sendError(
+          res,
+          "You cannot submit an application on behalf of another applicant",
+          "FORBIDDEN",
+          null,
+          403,
+        );
+      }
+
+      applicantIdToUse = user.id;
+      createdById = user.id;
+    } else if (actorRole === "field_officer") {
+      if (raw.applicantId) {
+        const target = await prisma.user.findUnique({
+          where: {
+            id: String(raw.applicantId),
+          },
+          select: {
+            id: true,
+            role: true,
+          },
+        });
+
+        if (!target) {
+          return sendError(
+            res,
+            "Supplied applicantId not found",
+            "NOT_FOUND",
+            null,
+            404,
+          );
+        }
+
+        if (target.role !== "citizen" && target.role !== "business_owner") {
+          return sendError(
+            res,
+            "Field officers may only create applications for citizens or business owners",
+            "VALIDATION_ERROR",
+            null,
+            400,
+          );
+        }
+
+        applicantIdToUse = target.id;
+      }
+
+      createdById = user.id;
+    } else {
+      return sendError(
+        res,
+        "You are not allowed to create applications",
+        "FORBIDDEN",
+        null,
+        403,
       );
-
-      return {
-        originalName: file.originalname,
-        fileName: file.filename,
-        relativePath: normalizedRelativePath,
-        url: `${serverUrl}/${normalizedRelativePath}`,
-        documentType: file.fieldname,
-      } as any;
-    });
+    }
 
     // ------------------------------------------------------------
     // CREATE
     // ------------------------------------------------------------
 
-    const result =
-      await ApplicationService.createOrUpdateApplication({
-        mode: "create",
-        applicantId: applicantIdToUse ?? undefined,
-        createdById,
-        serviceId: validation.data.serviceId,
-        formData: validation.data.formData,
-        files: filesMeta,
-        createInvoice: true,
-      });
+    const result = await ApplicationService.createOrUpdateApplication({
+      mode: "create",
+      applicantId: applicantIdToUse ?? undefined,
+      createdById,
+      serviceId: validation.data.serviceId,
+      formData: validation.data.formData,
+      files: filesMeta,
+      createInvoice: true,
+    });
 
     const application = result.application;
 
     if (application?.applicant) {
       try {
-        const fullName =
-          `${application.applicant.firstName} ${application.applicant.lastName}`;
+        const fullName = `${application.applicant.firstName} ${application.applicant.lastName}`;
 
         await notify({
           userId: application.applicantId,
@@ -446,12 +368,10 @@ export const createApplication = async (
           templateKey: "application.applicationSubmitted",
           vars: {
             applicant_name: fullName,
-            application_number:
-              application.applicationNumber,
+            application_number: application.applicationNumber,
             service_name: application.service.name,
             application_id: application.id,
-            fee_amount:
-              application.feeAmount.toString(),
+            fee_amount: application.feeAmount.toString(),
           },
           channels: ["email", "sms"],
         });
@@ -463,12 +383,7 @@ export const createApplication = async (
       }
     }
 
-    return sendSuccess(
-      res,
-      result,
-      null,
-      201,
-    );
+    return sendSuccess(res, result, null, 201);
   } catch (err: any) {
     if (files?.length) {
       for (const file of files) {
@@ -779,7 +694,7 @@ export const adminDeclineApplication = async (
 
     const app = await prisma.application.findUnique({
       where: { id: String(id) },
-       include: {
+      include: {
         applicant: true,
         service: true,
         invoice: true,
@@ -817,32 +732,32 @@ export const adminDeclineApplication = async (
       },
     });
 
-     try {
+    try {
       const fullName = `${app.applicant.firstName} ${app.applicant.lastName}`;
-     await notify({
-          userId: app.applicant.id,
-          to: { 
-            email: app.applicant.email, 
-            phone: app.applicant.phone ?? "" 
-          },
-          templateKey: "application.applicationDeclined",
-          vars: {
-            applicant_name: fullName,
-            application_number: app.applicationNumber,
-            service_name: app.service.name,
-            application_id: app.id,
-            service_id: app.serviceId,
-            // reviewer_name: app.reviewedBy ? `${app.reviewedBy.firstName} ${app.reviewedBy.lastName}` : 'Admin',
-            reviewed_at: new Date().toISOString(),
-            decline_reason: declineReason,
-          },
-          channels: ["email", "sms"],
-        });
+      await notify({
+        userId: app.applicant.id,
+        to: {
+          email: app.applicant.email,
+          phone: app.applicant.phone ?? "",
+        },
+        templateKey: "application.applicationDeclined",
+        vars: {
+          applicant_name: fullName,
+          application_number: app.applicationNumber,
+          service_name: app.service.name,
+          application_id: app.id,
+          service_id: app.serviceId,
+          // reviewer_name: app.reviewedBy ? `${app.reviewedBy.firstName} ${app.reviewedBy.lastName}` : 'Admin',
+          reviewed_at: new Date().toISOString(),
+          decline_reason: declineReason,
+        },
+        channels: ["email", "sms"],
+      });
     } catch (notifyErr) {
       console.error(
-          "[adminDeclineApplication] notify() failed, continuing anyway:",
-          notifyErr,
-        );
+        "[adminDeclineApplication] notify() failed, continuing anyway:",
+        notifyErr,
+      );
     }
 
     return sendSuccess(res, updated, "Application declined");

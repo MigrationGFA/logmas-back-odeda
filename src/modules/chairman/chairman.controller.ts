@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../utils/prisma';
 import { sendSuccess } from '../../utils/response';
 import { queryString } from '../complaints/complaints.controller';
+import { InvoiceStatus, PaymentStatus, Role } from '@prisma/client';
 
 const buildDateRange = (from?: string, to?: string) => {
   const now = new Date();
@@ -30,17 +31,56 @@ export const getChairmanOverview = async (req: any, res: Response, next: NextFun
       applicationStats,
       complaintStats,
       totalWards,
+      // Add paid invoices count for certificates
+      paidInvoicesCount,
+      // Get total invoices
+      totalInvoicesCount,
+      // Get pending bills (invoices that are not paid)
+      pendingBillsCount,
     ] = await Promise.all([
       prisma.invoice.aggregate({
         where: { createdAt: dateRange },
         _sum: { amount: true },
         _count: { _all: true },
       }),
-      prisma.user.count({ where: { role: 'field_officer', isActive: true } }),
-      prisma.invoice.count({ where: { paymentStatus: 'pending' } }),
-      prisma.application.groupBy({ by: ['status'], _count: { _all: true } }),
-      prisma.complaint.groupBy({ by: ['status'], _count: { _all: true } }),
+      prisma.user.count({ 
+        where: { 
+          role: Role.field_officer, 
+          isActive: true 
+        } 
+      }),
+      prisma.invoice.count({ 
+        where: { 
+          paymentStatus: {
+            not: PaymentStatus.confirmed
+          } 
+        } 
+      }),
+      prisma.application.groupBy({ 
+        by: ['status'], 
+        _count: { _all: true } 
+      }),
+      prisma.complaint.groupBy({ 
+        by: ['status'], 
+        _count: { _all: true } 
+      }),
       prisma.ward.count(),
+      // Paid invoices = certificates issued (assuming each paid invoice generates a certificate)
+      prisma.invoice.count({ 
+        where: { 
+          paymentStatus: PaymentStatus.confirmed 
+        } 
+      }),
+      // Total invoices count
+      prisma.invoice.count(),
+      // Pending bills (unpaid invoices)
+      prisma.invoice.count({ 
+        where: { 
+          paymentStatus: {
+            in: [PaymentStatus.pending]
+          } 
+        } 
+      }),
     ]);
 
     const apps = applicationStats.reduce((acc: Record<string, number>, curr) => {
@@ -62,21 +102,25 @@ export const getChairmanOverview = async (req: any, res: Response, next: NextFun
       success: true,
       role: 'chairman',
       metrics: {
+        // These match what the UI expects
         totalRevenue,
-        overdueInvoices: unpaidInvoicesCount,
-        wardCoverage: totalWards,
         pendingApplications,
+        approvedCertificates: paidInvoicesCount, // Paid invoices = certificates issued
+        pendingComplaints: openComplaints,
+        activeOfficersCount,
+        totalInvoicesCount,
+        pendingBillsCount,
+        wardCoverage: totalWards,
+        // Additional metrics if needed
+        overdueInvoices: unpaidInvoicesCount,
         approvedApplications,
         openComplaints,
-        activeOfficersCount,
-        totalInvoicesCount: revenueSummary._count._all,
       },
     });
   } catch (err) {
     next(err);
   }
 };
-
 /**
  * GET /api/v1/chairman/revenue
  * Revenue summary and simple trends.

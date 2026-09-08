@@ -320,6 +320,12 @@ export const fetchMetricsByRole = async (
         auditEventsCount,
         activeOfficers,
         paymentMethods,
+        recentAudits,
+        anomalies,
+        highValueTransactions,
+        // Add cash and digital payment aggregates
+        cashPaymentsAgg,
+        digitalPaymentsAgg,
       ] = await Promise.all([
         prisma.payment.aggregate({
           where: { status: PaymentStatus.confirmed },
@@ -327,16 +333,132 @@ export const fetchMetricsByRole = async (
         }),
         prisma.invoice.findMany({
           where: { paymentStatus: { not: PaymentStatus.confirmed } },
-          select: { id: true, amount: true },
+          select: {
+            id: true,
+            amount: true,
+            invoiceNumber: true,
+            createdAt: true,
+          },
         }),
         prisma.receipt.count(),
-        prisma.auditLog.count(),
+        prisma.auditLog.count({
+          where: {
+            createdAt: {
+              gte: new Date(new Date().setDate(new Date().getDate() - 30)),
+            },
+          },
+        }),
         prisma.user.count({
           where: { role: Role.field_officer, isActive: true },
         }),
         prisma.payment.groupBy({
           by: ["method"],
           where: { status: PaymentStatus.confirmed },
+          _sum: { amount: true },
+        }),
+        // Recent audit logs
+        prisma.auditLog.findMany({
+          where: {
+            createdAt: {
+              gte: new Date(new Date().setDate(new Date().getDate() - 7)),
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+                role: true,
+              },
+            },
+          },
+        }),
+        // Anomalies - failed payments
+        prisma.payment.findMany({
+          where: {
+            status: PaymentStatus.failed,
+            createdAt: {
+              gte: new Date(new Date().setDate(new Date().getDate() - 7)),
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          include: {
+            invoice: {
+              include: {
+                service: true,
+                application: {
+                  include: {
+                    applicant: {
+                      select: {
+                        firstName: true,
+                        lastName: true,
+                        email: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+        // High value transactions
+        prisma.payment.findMany({
+          where: {
+            status: PaymentStatus.confirmed,
+            amount: {
+              gt: 100000,
+            },
+            createdAt: {
+              gte: new Date(new Date().setDate(new Date().getDate() - 7)),
+            },
+          },
+          orderBy: { amount: "desc" },
+          take: 5,
+          include: {
+            invoice: {
+              include: {
+                service: true,
+                application: {
+                  include: {
+                    applicant: {
+                      select: {
+                        firstName: true,
+                        lastName: true,
+                        email: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+        // Cash payments aggregate (POS and Cash)
+        prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.confirmed,
+            method: {
+              in: [PaymentMethod.pos, PaymentMethod.cash],
+            },
+          },
+          _sum: { amount: true },
+        }),
+        // Digital payments aggregate (online_gateway, bank_transfer, virtual_account)
+        prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.confirmed,
+            method: {
+              in: [
+                PaymentMethod.online_gateway,
+                PaymentMethod.bank_transfer,
+                PaymentMethod.virtual_account,
+              ],
+            },
+          },
           _sum: { amount: true },
         }),
       ]);
@@ -346,6 +468,53 @@ export const fetchMetricsByRole = async (
         (s, i) => s + Number(i.amount ?? 0),
         0,
       );
+      const cashCollected = Number(cashPaymentsAgg._sum.amount ?? 0);
+      const digitalCollected = Number(digitalPaymentsAgg._sum.amount ?? 0);
+
+      // Transform anomalies to match UI expectations
+      const transformedAnomalies = anomalies.map((p) => ({
+        id: p.id,
+        type: "Failed Payment",
+        description: `Failed payment of ₦${Number(p.amount).toLocaleString()} for ${p.invoice.service.name}`,
+        severity: p.status === PaymentStatus.failed ? "high" : "medium",
+        date: p.createdAt,
+        status: p.status,
+        applicationId: p.invoice.applicationId,
+        amount: Number(p.amount),
+        applicantName: p.invoice.application?.applicant
+          ? `${p.invoice.application.applicant.firstName} ${p.invoice.application.applicant.lastName}`
+          : "Unknown",
+        serviceName: p.invoice.service.name,
+      }));
+
+      // Transform high value transactions
+      const transformedHighValueTransactions = highValueTransactions.map(
+        (p) => ({
+          id: p.id,
+          amount: Number(p.amount),
+          date: p.createdAt,
+          applicantName: p.invoice.application?.applicant
+            ? `${p.invoice.application.applicant.firstName} ${p.invoice.application.applicant.lastName}`
+            : "Unknown",
+          serviceName: p.invoice.service.name,
+          status: p.status,
+          reference: p.reference,
+        }),
+      );
+
+      // Transform recent audits
+      const transformedRecentAudits = recentAudits.map((log) => ({
+        id: log.id,
+        action: log.action,
+        entity: log.entity || "System",
+        details: log.details || {},
+        createdAt: log.createdAt,
+        actorRole: log.user?.role || "System",
+        actor: log.user
+          ? `${log.user.firstName} ${log.user.lastName}`
+          : "System",
+        ipAddress: log.ipAddress,
+      }));
 
       return {
         metrics: {
@@ -354,7 +523,12 @@ export const fetchMetricsByRole = async (
           receiptsCount,
           auditEvents: auditEventsCount,
           activeOfficers,
+          cashCollected,
+          digitalCollected,
         },
+        anomalies: transformedAnomalies,
+        highValueTransactions: transformedHighValueTransactions,
+        recentAudits: transformedRecentAudits,
         paymentMethods: paymentMethods.map((p) => ({
           method: p.method,
           amount: Number(p._sum.amount ?? 0),

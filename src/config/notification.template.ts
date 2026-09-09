@@ -127,31 +127,26 @@ export const applicationTemplates = {
     <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
       <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Application Number:</span> <strong style="font-family: monospace;">{{application_number}}</strong></div>
       <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Service:</span> {{service_name}}</div>
-      // <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed By:</span> {{reviewer_name}}</div>
+      <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed By:</span> {{reviewer_name}}</div>
       <div style="margin-bottom: 8px;"><span style="color: #6b7280;">Reviewed At:</span> {{reviewed_at}}</div>
       <div><span style="color: #6b7280;">Status:</span> <span style="color: #10b981; font-weight: bold;">Approved</span></div>
     </div>
-    {{#if certificate}}
     <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px; margin: 20px 0;">
       <p style="margin: 0; font-size: 13px; color: #92400e;">
         <strong>Certificate Information:</strong><br>
-        Certificate Number: {{certificate.certificate_number}}<br>
-        Verification Code: {{certificate.verification_code}}
+        Certificate Number: {{certificate_number}}<br>
+        Verification Code: {{verification_code}}
       </p>
     </div>
-    {{/if}}
-    {{#if invoice}}
     <div style="background: #eff6ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
       <p style="margin: 0 0 4px; font-size: 13px; color: #6b7280;">Payment Details</p>
       <p style="margin: 0; font-size: 14px;">
-        <strong>Amount Due:</strong> ₦{{invoice.amount}}<br>
-        <strong>Invoice Number:</strong> {{invoice.invoice_number}}<br>
-        <strong>Status:</strong> {{invoice.payment_status}}
+        <strong>Amount Due:</strong> ₦{{invoice_amount}}<br>
+        <strong>Invoice Number:</strong> {{invoice_number}}<br>
+        <strong>Status:</strong> {{invoice_status}}
       </p>
     </div>
-    {{/if}}
-    <p style="font-size: 13px; color: #6b7280;">Please proceed with payment to receive your certificate/license.</p>
-    <a href="${BASE_URL}/dashboard/applications/{{application_id}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">View Application →</a>
+    <a href="${BASE_URL}/certificate/{{application_number}}" style="display: inline-block; background: #1a4731; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">View Certificate →</a>
   </div>
 </body>
 </html>`,

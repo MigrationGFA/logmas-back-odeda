@@ -7,6 +7,7 @@ import * as ApplicationService from "./application.service";
 import { createApplicationSchema } from "./application.validation";
 import { prisma } from "../../utils/prisma";
 import { notify } from "../notification/notification.service";
+import { generateQrToken, generateReceiptNumber, generateVerificationCode } from "../../utils/generators";
 
 export const createApplication = async (
   req: Request,
@@ -599,6 +600,7 @@ export const adminApproveApplication = async (
         applicant: true,
         service: true,
         invoice: true,
+        certificate: true,
       },
     });
     if (!app)
@@ -612,14 +614,39 @@ export const adminApproveApplication = async (
         400,
       );
 
-    const updated = await prisma.application.update({
+      const result = await prisma.$transaction(async (tx) => {
+
+    const updated = await tx.application.update({
       where: { id: String(id) },
       data: {
         status: "approved",
         reviewedById: adminId,
         reviewedAt: new Date(),
       },
+      include: {
+        reviewedBy: true,
+      },
     });
+
+    const certificate = await tx.certificate.create({
+        data: {
+          application: {
+            connect: { id: String(id) },
+          },
+          certificateNumber: generateReceiptNumber('CERT'),
+          verificationCode: generateVerificationCode(),
+          qrToken: generateQrToken(),
+          issuedAt: new Date(),
+          issuedBy: {
+            connect: { id: adminId },
+          },
+          // expiresAt — optional, set if needed
+        },
+      });
+
+          return {  updated, certificate };
+    });
+
 
     await prisma.auditLog.create({
       data: {
@@ -631,6 +658,7 @@ export const adminApproveApplication = async (
         ipAddress: req.ip,
       },
     });
+
 
     try {
       const fullName = `${app.applicant.firstName} ${app.applicant.lastName}`;
@@ -646,12 +674,16 @@ export const adminApproveApplication = async (
           application_number: app.applicationNumber,
           service_name: app.service.name,
           application_id: app.id,
-          // reviewer_name: app.reviewedBy ? `${app.reviewedBy.firstName} ${app.reviewedBy.lastName}` : 'Admin',
-          reviewed_at: new Date().toISOString(),
+          reviewer_name: result.updated.reviewedById
+            ? `${result.updated.reviewedBy.firstName} ${result.updated.reviewedBy.lastName}`
+            : "Admin",
+          reviewed_at: new Date().toLocaleDateString(),
           fee_amount: app.feeAmount.toString(),
           invoice_number: app.invoice.invoiceNumber,
           invoice_amount: app.invoice.amount.toString(),
           invoice_status: app.invoice.paymentStatus,
+          certificate_number: result.certificate?.certificateNumber,
+          verification_code: result.certificate?.verificationCode,
         },
         channels: ["email", "sms"],
       });
@@ -662,7 +694,7 @@ export const adminApproveApplication = async (
       );
     }
 
-    return sendSuccess(res, updated, "Application approved");
+    return sendSuccess(res, result.updated, "Application approved");
   } catch (err) {
     next(err);
   }
@@ -719,6 +751,9 @@ export const adminDeclineApplication = async (
         reviewedAt: new Date(),
         declineReason,
       },
+      include: {
+        reviewedBy: true,
+      },
     });
 
     await prisma.auditLog.create({
@@ -747,8 +782,10 @@ export const adminDeclineApplication = async (
           service_name: app.service.name,
           application_id: app.id,
           service_id: app.serviceId,
-          // reviewer_name: app.reviewedBy ? `${app.reviewedBy.firstName} ${app.reviewedBy.lastName}` : 'Admin',
           reviewed_at: new Date().toISOString(),
+          reviewer_name: updated.reviewedById
+            ? `${updated.reviewedBy.firstName} ${updated.reviewedBy.lastName}`
+            : "Admin",
           decline_reason: declineReason,
         },
         channels: ["email", "sms"],

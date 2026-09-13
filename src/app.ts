@@ -20,6 +20,7 @@ import gernralRoutes from './modules/general/general.routes';
 import invoiceRoutes from './modules/invoice/invoice.routes';
 import applicationRoutes from './modules/application/application.routes';
 import receiptRoutes from './modules/receipts/receipt.routes';
+import certificateRoutes from './modules/certificate/certificate.routes';
 import dashboardRoutes from './modules/dashboard/dashboard.controller';
 import serviceRoutes from "./modules/services/service.routes";
 
@@ -93,6 +94,7 @@ app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/field-officer', fieldOperationsRoutes);
 app.use('/api/v1/uploads', uploadRoutes);
 app.use('/api/v1/receipts', receiptRoutes);
+app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/v1/chairman',    chairmanRoutes);
 
 

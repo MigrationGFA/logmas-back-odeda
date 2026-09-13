@@ -46,9 +46,9 @@ export const getMyNotifications = async (req: Request, res: Response, next: Next
       return sendError(res, "User not found", "NOT_FOUND", null, 404); // TODO: match your sendError path
     }
 
-    if(!user.notifyByInApp){
-      return sendError(res, "In-app notifications are disabled for this user", "NOT_FOUND", null, 404); 
-    }
+    // if(!user.notifyByInApp){
+    //   return sendError(res, "In-app notifications are disabled for this user", "NOT_FOUND", null, 404); 
+    // }
 
     const [items, unreadCount] = await Promise.all([
       prisma.notification.findMany({

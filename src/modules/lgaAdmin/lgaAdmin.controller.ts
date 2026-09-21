@@ -362,6 +362,7 @@ export const createStaff = async (
         password: hashedPassword,
         createdById: adminId,
         role: role as Role,
+        passwordResetRequired: true,
         // Match the specific schema properties for WC vs FO
         // ...(wardId && isWardCouncillor && { assignedWardId: wardId }),
         // ...(wardId &&

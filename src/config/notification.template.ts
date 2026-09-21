@@ -1,7 +1,7 @@
 // src/notifications/templates/index.ts
 // ============================================================
 // LOGMAS NOTIFICATION TEMPLATES
-// Ijebu North East Local Government
+// ${} Local Government
 // ============================================================
 // Usage: interpolate(templates.soo.invoiceGenerated.sms, { applicant_name: "John", ... })
 
@@ -16,6 +16,8 @@ export const interpolate = (
 };
 
 const BASE_URL = process.env.FRONTEND_URL;
+
+const lgaName = process.env.LGA_NAME ?? "Odeda";
 
 export const applicationTemplates = {
   // Application Submitted - Initial Confirmation
@@ -413,14 +415,14 @@ export const complaintTemplates = {
 export const accountTemplates = {
   // Stage 1 — Password Reset
   passwordReset: {
-    emailSubject: `Reset your Ijebu North East Portal Password`,
+    emailSubject: `Reset your ${lgaName} Portal Password`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #6366f1;">
     <h2>Password Reset Request</h2>
-    <p>We received a request to reset the password for your Ijebu North East portal account.</p>
+    <p>We received a request to reset the password for your ${lgaName} portal account.</p>
     <div style="text-align: center; margin: 32px 0;">
       <a href="{{reset_link}}" style="display: inline-block; background: #4f46e5; color: #fff; text-decoration: none; padding: 14px 40px; border-radius: 6px; font-weight: bold; font-size: 16px;">Reset My Password →</a>
     </div>
@@ -444,7 +446,7 @@ export const accountTemplates = {
       <h2 style="color: #991b1b; margin: 0;">🔒 Account Suspended</h2>
     </div>
     <p>Dear {{applicant_name}},</p>
-    <p>For the security and integrity of the Ijebu North East portal, your account has been temporarily suspended.</p>
+    <p>For the security and integrity of the ${lgaName} portal, your account has been temporarily suspended.</p>
     <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
       <p style="margin: 0;"><strong>Reason:</strong> {{suspension_reason}}</p>
     </div>
@@ -462,7 +464,7 @@ export const accountTemplates = {
   // alongside passwordReset and accountSuspended.
 
   passwordChanged: {
-    sms: `Hello {{applicant_name}}, your Ijebu North East portal password was just changed. If this wasn't you, contact the LGA Secretariat immediately.`,
+    sms: `Hello {{applicant_name}}, your ${lgaName} portal password was just changed. If this wasn't you, contact the LGA Secretariat immediately.`,
 
     emailSubject: `Your Password Was Changed`,
     emailHtml: `
@@ -472,7 +474,7 @@ export const accountTemplates = {
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #1a4731;">
     <h2>Password Changed</h2>
     <p>Dear <strong>{{applicant_name}}</strong>,</p>
-    <p>This confirms that the password for your Ijebu North East portal account was just changed.</p>
+    <p>This confirms that the password for your ${lgaName} portal account was just changed.</p>
     <div style="background: #fef3c7; border-radius: 8px; padding: 16px; font-size: 13px; margin-top: 16px;">
       <p style="margin: 0;"><strong>Didn't do this?</strong> Contact the LGA Secretariat immediately — your account may be compromised.</p>
     </div>
@@ -482,7 +484,7 @@ export const accountTemplates = {
   },
 
   accountReactivated: {
-    sms: `Hello {{applicant_name}}, your Ijebu North East portal account has been reactivated. You can now log in as usual.`,
+    sms: `Hello {{applicant_name}}, your ${lgaName} portal account has been reactivated. You can now log in as usual.`,
 
     emailSubject: `Your Account Has Been Reactivated`,
     emailHtml: `
@@ -492,14 +494,14 @@ export const accountTemplates = {
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #15803d;">
     <h2 style="color: #15803d;">✓ Account Reactivated</h2>
     <p>Dear <strong>{{applicant_name}}</strong>,</p>
-    <p>Your Ijebu North East portal account has been reactivated. You may log in as usual.</p>
+    <p>Your ${lgaName} portal account has been reactivated. You may log in as usual.</p>
   </div>
 </body>
 </html>`,
   },
 
   passwordResetByAdmin: {
-    sms: `Hello {{applicant_name}}, your LOGMAS password was reset by an administrator. Temporary password: {{temp_password}}. You must change it on next login.`,
+    sms: `Hello {{applicant_name}}, your ${lgaName} password was reset by an administrator. Temporary password: {{temp_password}}. You must change it on next login.`,
 
     emailSubject: `Your Password Was Reset`,
     emailHtml: `
@@ -526,7 +528,7 @@ export const accountTemplates = {
   welcomeStaff: {
     sms: `Welcome to LOGMAS, {{applicant_name}}. Your account has been created. Temporary password: {{temp_password}}. Login at: ${BASE_URL}/login — Change your password immediately.`,
 
-    emailSubject: `Welcome to Ijebu North East LGA Portal — Account Created`,
+    emailSubject: `Welcome to ${lgaName} LGA Portal — Account Created`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
@@ -534,7 +536,7 @@ export const accountTemplates = {
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
     <div style="background: #1a4731; padding: 32px; text-align: center;">
       <h1 style="color: #fff; margin: 0;">Welcome to LOGMAS</h1>
-      <p style="color: #a7f3d0; margin: 4px 0 0;">Ijebu North East Local Government</p>
+      <p style="color: #a7f3d0; margin: 4px 0 0;">${lgaName} Local Government</p>
     </div>
     <div style="padding: 32px;">
       <p>Dear <strong>{{applicant_name}}</strong>,</p>
@@ -560,9 +562,9 @@ export const accountTemplates = {
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
     
     <div style="background: #1a4731; padding: 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0;">Welcome to LOGMAS</h1>
+      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName} LOGMAS</h1>
       <p style="color: #a7f3d0; margin: 4px 0 0;">
-        Local Government Management System
+        ${lgaName} Local Government Management System
       </p>
     </div>
 
@@ -614,9 +616,9 @@ export const accountTemplates = {
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
 
     <div style="background: #1a4731; padding: 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0;">LOGMAS</h1>
+      <h1 style="color: #fff; margin: 0;">${lgaName} LOGMAS</h1>
       <p style="color: #a7f3d0; margin: 4px 0 0;">
-        Local Government Management System
+        ${lgaName} Local Government Management System
       </p>
     </div>
 

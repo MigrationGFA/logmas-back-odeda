@@ -135,6 +135,22 @@ export async function confirmPayment({
 
   const isFullPayment = newBalanceDue === 0;
 
+
+  await prisma.auditLog.create({
+    data: {
+      action: "payment_confirmed",
+      entity: "payment",
+      entityId: existingPayment?.id ?? "",
+      userId: confirmedById,
+      details: {
+        amount,
+        invoiceId,
+        method,
+        status: "confirmed",
+      },
+    },
+  });
+
   // ---------------------------------------------------------
   // 4. Create/confirm payment + receipt atomically
   // ---------------------------------------------------------

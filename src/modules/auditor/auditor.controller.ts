@@ -35,6 +35,7 @@ export const getAuditLogs = async (
     const action = queryString(req.query.action) as AuditAction | undefined;
     const userId = queryString(req.query.userId);
     const entity = queryString(req.query.entity);
+    const role = queryString(req.query.role);
     const search = queryString(req.query.search);
     const from = queryString(req.query.from);
     const to = queryString(req.query.to);
@@ -46,6 +47,7 @@ export const getAuditLogs = async (
     if (action) where.action = action;
     if (userId) where.userId = userId;
     if (entity) where.entity = entity;
+    if (role) where.user = { ...where.user, role };
     if (from || to) where.createdAt = buildDateRange(from, to);
 
     if (search) {

@@ -180,6 +180,7 @@ export const login = async (
         emailVerifiedAt:user.emailVerifiedAt,
         onboardingCompleted: user.onboardingCompleted,
         isActive: user.isActive,
+        notifyByInApp: user.notifyByInApp,
         // passwordResetRequired: user.passwordResetRequired, // NEW
       },
     });

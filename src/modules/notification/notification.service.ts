@@ -2,7 +2,11 @@
 
 import { sendSms } from "./sms.service";
 import { sendEmail } from "./email.service";
-import { NotificationTemplates, interpolate, TemplateVars } from "../../config/notification.template";
+import {
+  NotificationTemplates,
+  interpolate,
+  TemplateVars,
+} from "../../config/notification.template";
 import { prisma } from "../../utils/prisma";
 
 type Channel = "sms" | "email"; // in-app is implicit, not something you "request" anymore
@@ -43,7 +47,9 @@ function stringifyError(error: unknown): string {
 // subject as a "title" and the sms text (usually the shortest, cleanest
 // summary) as the body, falling back sensibly if only one exists.
 function buildInAppContent(template: ResolvedTemplate, vars: TemplateVars) {
-  const title = template.emailSubject ? interpolate(template.emailSubject, vars) : undefined;
+  const title = template.emailSubject
+    ? interpolate(template.emailSubject, vars)
+    : undefined;
   const message = template.sms
     ? interpolate(template.sms, vars)
     : template.emailSubject
@@ -52,20 +58,56 @@ function buildInAppContent(template: ResolvedTemplate, vars: TemplateVars) {
   return { title, message };
 }
 
-export async function notify({ userId, to, templateKey, vars, channels }: NotifyParams) {
-  const template = resolveTemplate(templateKey);
-
+/**
+ * Resolves which external channels (email / sms) should actually be used for a
+ * user, based on their stored notification preferences.
+ *
+ * A requested channel is only kept when the user has the matching preference
+ * enabled:
+ *  - `notifyByEmail` -> email is kept
+ *  - `notifyBySms`   -> sms is kept
+ * If the user has NEITHER email nor SMS selected, the returned array is empty so
+ * no external notification is sent at all (in-app rows are unaffected).
+ *
+ * @param userId   The target user id (preferences are read from the User row).
+ * @param channels The channels that were requested for this notification.
+ * @returns Only the channels the user has explicitly opted into.
+ */
+export async function resolvePreferredChannels(
+  userId: string,
+  channels: Channel[],
+): Promise<Channel[]> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { notifyByEmail: true, notifyBySms: true, notifyByInApp: true },
+    select: { notifyByEmail: true, notifyBySms: true },
   });
 
-  const wantsSms = channels.includes("sms");
-  const wantsEmail = channels.includes("email");
+  const enabled: Channel[] = [];
+  if (channels.includes("email") && (user?.notifyByEmail ?? true))
+    enabled.push("email");
+  if (channels.includes("sms") && (user?.notifyBySms ?? true))
+    enabled.push("sms");
+  return enabled;
+}
 
-  const smsEnabled = wantsSms && (user?.notifyBySms ?? true) && !!to.phone && !!template.sms;
+export async function notify({
+  userId,
+  to,
+  templateKey,
+  vars,
+  channels,
+}: NotifyParams) {
+  const template = resolveTemplate(templateKey);
+
+  // Only send the channels the user has actually opted into (email / sms).
+  const preferred = await resolvePreferredChannels(userId, channels);
+
+  const wantsSms = preferred.includes("sms");
+  const wantsEmail = preferred.includes("email");
+
+  const smsEnabled = wantsSms && !!to.phone && !!template.sms;
   const emailEnabled =
-    wantsEmail && (user?.notifyByEmail ?? true) && !!to.email && !!template.emailHtml && !!template.emailSubject;
+    wantsEmail && !!to.email && !!template.emailHtml && !!template.emailSubject;
 
   const { title, message } = buildInAppContent(template, vars);
 
@@ -83,7 +125,9 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
 
   // ── Fire whatever's enabled in parallel ──
   const [smsResult, emailResult] = await Promise.all([
-    smsEnabled ? sendSms({ to: to.phone!, message: interpolate(template.sms!, vars) }) : null,
+    smsEnabled
+      ? sendSms({ to: to.phone!, message: interpolate(template.sms!, vars) })
+      : null,
     emailEnabled
       ? sendEmail({
           to: to.email!,
@@ -100,19 +144,37 @@ export async function notify({ userId, to, templateKey, vars, channels }: Notify
       ...(smsResult
         ? smsResult.success
           ? { smsStatus: "sent", smsSentAt: new Date() }
-          : { smsStatus: "failed", smsFailReason: stringifyError(smsResult.error) }
+          : {
+              smsStatus: "failed",
+              smsFailReason: stringifyError(smsResult.error),
+            }
         : {}),
       ...(emailResult
         ? emailResult.success
           ? { emailStatus: "sent", emailSentAt: new Date() }
-          : { emailStatus: "failed", emailFailReason: stringifyError(emailResult.error) }
+          : {
+              emailStatus: "failed",
+              emailFailReason: stringifyError(emailResult.error),
+            }
         : {}),
     },
   });
 
   return {
     notificationId: record.id,
-    sms: smsEnabled ? { success: smsResult!.success, error: smsResult!.error, skipped: false } : wantsSms ? { success: false, skipped: true } : undefined,
-    email: emailEnabled ? { success: emailResult!.success, error: emailResult!.error, skipped: false } : wantsEmail ? { success: false, skipped: true } : undefined,
+    sms: smsEnabled
+      ? { success: smsResult!.success, error: smsResult!.error, skipped: false }
+      : wantsSms
+        ? { success: false, skipped: true }
+        : undefined,
+    email: emailEnabled
+      ? {
+          success: emailResult!.success,
+          error: emailResult!.error,
+          skipped: false,
+        }
+      : wantsEmail
+        ? { success: false, skipped: true }
+        : undefined,
   };
 }

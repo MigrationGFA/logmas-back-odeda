@@ -27,6 +27,7 @@ import serviceRoutes from "./modules/services/service.routes";
 import { errorHandler } from './middleware/error.middleware';
 import { swaggerDocument } from './config/swagger';
 import paymentRoutes from './modules/payment/payment.routes';
+import gpayRoutes from './modules/payment/gpay.routes';
 import rateLimit from 'express-rate-limit';
 
 
@@ -72,6 +73,7 @@ app.get('/', (req, res) => {
 
 app.use('/public', express.static('public'));
 app.use("/api/v1/payments", paymentRoutes); // must come before express.json() below
+app.use("/api/v1/payments/gpay", gpayRoutes); // also before express.json() — GPay signs the raw webhook body
 app.use(express.json());
 
 

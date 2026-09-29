@@ -74,6 +74,20 @@ enum PaymentStatus {
   reversed
 }
 
+// Which gateway a checkout session was created with.
+enum PaymentProvider {
+  paystack
+  gpay
+}
+
+// What a PaymentIntent is paying for.
+//   invoice_online  — an existing invoice paid by a logged-in user
+//   new_application — the public "apply + pay first" flow
+enum PaymentIntentFlow {
+  invoice_online
+  new_application
+}
+
 enum ComplaintStatus {
   open
   assigned
@@ -406,6 +420,8 @@ model Invoice {
 
   payments Payment[]
 
+  paymentIntents PaymentIntent[]
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   receipts  Receipt[]
@@ -435,6 +451,61 @@ model Payment {
   updatedAt DateTime @updatedAt
 
   @@map("payments")
+}
+
+// ============================================================
+// GATEWAY CHECKOUT INTENTS
+// ============================================================
+// A checkout session we opened with a payment gateway, keyed by `reference`
+// (sent to the gateway as `merchant_transaction_ref`).
+//
+// Why this table exists: Paystack echoes a `metadata` object back on verify and
+// webhook, so the public flow used to keep its context there. GPay does NOT echo
+// any metadata, so the context has to live on our side — this row is the only way
+// the public "new_application" flow can recover what the payment was for when the
+// webhook/verify comes back.
+model PaymentIntent {
+  id String @id @default(uuid())
+
+  // Our own unique reference — the gateway's `merchant_transaction_ref`
+  reference String @unique
+
+  provider PaymentProvider  @default(gpay)
+  flow     PaymentIntentFlow
+  amount   Decimal          @db.Decimal(12, 2)
+  currency String           @default("NGN")
+  status   PaymentStatus    @default(pending)
+
+  // Set for the invoice_online flow only (null for new_application)
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  // Context captured at initiate time (serviceId / fullName / email / phone / userId...).
+  // Replayed as `metadata` into completeNewApplicationAfterPayment() on confirmation.
+  payload Json
+
+  // Gateway-side identifiers, retained for reconciliation and support
+  gpayReference       String?
+  mastercardSessionId String?
+  gatewayReference    String?
+  checkoutUrl         String?
+
+  // Raw gateway responses so we can audit exactly which field reported what
+  initiateResponse Json?
+  lastResponse     Json?
+
+  paidAt      DateTime?
+  completedAt DateTime?
+  expiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([flow])
+  @@index([invoiceId])
+  @@index([gpayReference])
+  @@map("payment_intents")
 }
 
 model Receipt {

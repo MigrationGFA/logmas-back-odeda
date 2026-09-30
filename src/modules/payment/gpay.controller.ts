@@ -14,7 +14,15 @@ import {
   isWebhookPaymentEvent,
   isWebhookPaid,
   type GpayWebhookPayload,
+  SERVICE_CODE_BY_SERVICE,
+  findReservedAccount,
+  isReservedVaWebhook,
+  parseLagosDateTime,
+  serviceCodeForGpay,
+  type GpayReservedVaWebhookData,
+  type ReservedVirtualAccount,
 } from "./gpay.service";
+import { notify } from "../notification/notification.service";
 
 // ─────────────────────────────────────────────────────────────
 // GPay (Mastercard MPGS) controllers
@@ -561,6 +569,249 @@ export const verifyGpayPayment = async (
   }
 };
 
+// ── Reserved virtual account details ──────────────────────────────────────
+// Two entry points share one resolver:
+//   * getVirtualAccountForService — PUBLIC, keyed by serviceId (no invoice yet)
+//   * getInvoiceVirtualAccount    — AUTHED,  keyed by invoiceNumber
+//
+// The client only ever passes an IDENTITY. The account itself is resolved
+// server side (service → map → GPay service_code → one active account) so a
+// browser can never be handed the wrong service's account, and the reserved
+// pool is never serialized to a client.
+
+/**
+ * Reuse window for the pending reference. Re-reading the page re-quotes the
+ * SAME reference instead of minting another candidate — two candidates would be
+ * flagged `ambiguous` by the webhook and never auto-attach.
+ */
+const VA_REUSE_WINDOW_MS = 60 * 60 * 1000;
+
+interface VaFailure {
+  code: string;
+  message: string;
+  status: number;
+}
+
+const vaUnavailable = (message: string): VaFailure => ({
+  code: "VIRTUAL_ACCOUNT_UNAVAILABLE",
+  message,
+  status: 404,
+});
+
+/** Our one active reserved account for a service, or the reason we can't give one. */
+async function resolveReservedAccount(
+  serviceCode: string,
+): Promise<{ account: ReservedVirtualAccount } | { failure: VaFailure }> {
+  const gpayServiceCode = SERVICE_CODE_BY_SERVICE[serviceCode];
+
+  if (!gpayServiceCode) {
+    console.warn(
+      `[gpay.va] no reserved-account mapping for service "${serviceCode}"`,
+    );
+    return {
+      failure: vaUnavailable("Bank transfer is not available for this service"),
+    };
+  }
+
+  try {
+    const account = await findReservedAccount(gpayServiceCode);
+    if (!account) {
+      return {
+        failure: vaUnavailable(
+          "No active transfer account is available for this service",
+        ),
+      };
+    }
+    return { account };
+  } catch (err: any) {
+    console.error(
+      "[gpay.va] reserved account lookup failed:",
+      err?.message ?? err,
+    );
+    return { failure: vaUnavailable("Transfer account lookup failed") };
+  }
+}
+
+/** The pending Payment whose `reference` the citizen quotes in their narration. */
+async function pendingTransferReference(opts: {
+  serviceCode: string;
+  amount: number;
+  invoiceId?: string | null;
+}): Promise<string> {
+  const existing = await prisma.payment.findFirst({
+    where: {
+      status: "pending",
+      method: "bank_transfer",
+      serviceCode: opts.serviceCode,
+      invoiceId: opts.invoiceId ?? null,
+      createdAt: { gte: new Date(Date.now() - VA_REUSE_WINDOW_MS) },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { reference: true },
+  });
+  if (existing) return existing.reference;
+
+  const reference = generateReference();
+  await prisma.payment.create({
+    data: {
+      reference,
+      amount: opts.amount,
+      method: "bank_transfer",
+      status: "pending",
+      serviceCode: opts.serviceCode,
+      ...(opts.invoiceId ? { invoice: { connect: { id: opts.invoiceId } } } : {}),
+    },
+  });
+  return reference;
+}
+
+/**
+ * GET /api/v1/payments/gpay/virtual-account?serviceId=
+ * PUBLIC. Asks for nothing but the service identity — never an account number.
+ */
+export const getVirtualAccountForService = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const serviceId = String(req.query.serviceId ?? "").trim();
+    if (!serviceId) {
+      return sendError(res, "serviceId is required", "VALIDATION_ERROR", null, 400);
+    }
+
+    const service = await prisma.service.findUnique({
+      where: { id: serviceId },
+      include: { feeConfig: true },
+    });
+
+    if (!service) {
+      return sendError(res, "Service not found", "NOT_FOUND", null, 404);
+    }
+    if (!service.isActive) {
+      return sendError(res, "Service is not active", "SERVICE_INACTIVE", null, 400);
+    }
+    if (!service.feeConfig || service.feeConfig.status !== "ACTIVE") {
+      return sendError(
+        res,
+        "Service fee is not configured",
+        "SERVICE_FEE_NOT_CONFIGURED",
+        null,
+        400,
+      );
+    }
+
+    const resolved = await resolveReservedAccount(service.code);
+    if ("failure" in resolved) {
+      return sendError(
+        res,
+        resolved.failure.message,
+        resolved.failure.code,
+        null,
+        resolved.failure.status,
+      );
+    }
+
+    const expectedAmount = Number(service.feeConfig.amount);
+    const reference = await pendingTransferReference({
+      serviceCode: service.code,
+      amount: expectedAmount,
+    });
+
+    // Allow-list only: total_settled / bank_code / created_at / service_name
+    // and the rest of the reserved-account payload never leave the server.
+    return sendSuccess(res, {
+      bankName: resolved.account.bankName,
+      accountNumber: resolved.account.accountNumber,
+      accountName: resolved.account.accountName,
+      reference,
+      expectedAmount,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/v1/invoices/:invoiceNumber/virtual-account
+ * Also mounted as /api/v1/payments/gpay/invoices/:invoiceNumber/virtual-account
+ * (the handler is shared; both URLs work during rollout).
+ * Same guards as initializeGpayInvoicePayment.
+ */
+export const getInvoiceVirtualAccount = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { invoiceNumber } = req.params;
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { invoiceNumber: String(invoiceNumber) },
+      include: { service: { select: { id: true, code: true, name: true } } },
+    });
+
+    if (!invoice) {
+      return sendError(res, "Invoice not found", "NOT_FOUND", null, 404);
+    }
+    // PaymentStatus is pending|confirmed|failed|reversed — it has no "paid" or
+    // "cancelled" member, so the old ["paid","cancelled"] guard could never
+    // fire and a settled invoice was still handed transfer instructions.
+    if (invoice.paymentStatus !== "pending") {
+      return sendError(
+        res,
+        `Invoice is already ${invoice.paymentStatus}`,
+        "BAD_REQUEST",
+        null,
+        400,
+      );
+    }
+
+    const resolved = await resolveReservedAccount(invoice.service.code);
+    if ("failure" in resolved) {
+      return sendError(
+        res,
+        resolved.failure.message,
+        resolved.failure.code,
+        null,
+        resolved.failure.status,
+      );
+    }
+
+    const amount = Number(invoice.amount);
+    const reference = await pendingTransferReference({
+      serviceCode: invoice.service.code,
+      amount,
+      invoiceId: invoice.id,
+    });
+
+    // First read only. Gated on virtualAccountNumber because virtualBankName
+    // already carries a stale column default on EVERY existing row, so gating
+    // on it would never fire — and would leave "Zenith Bank" on screen.
+    if (!invoice.virtualAccountNumber) {
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          virtualAccountNumber: resolved.account.accountNumber,
+          virtualBankName: resolved.account.bankName,
+        },
+      });
+    }
+
+    return sendSuccess(res, {
+      bankName: resolved.account.bankName,
+      accountNumber: resolved.account.accountNumber,
+      accountName: resolved.account.accountName,
+      reference,
+      expectedAmount: amount,
+      amount,
+      invoiceNumber: invoice.invoiceNumber,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ── Webhook: POST /api/v1/payments/gpay/webhook ──
 
 export const gpayWebhook = async (req: Request, res: Response) => {
@@ -581,6 +832,15 @@ export const gpayWebhook = async (req: Request, res: Response) => {
 
   try {
     const payload = JSON.parse(rawBody.toString("utf8")) as GpayWebhookPayload;
+
+    // Reserved virtual-account credits share `event: "charge.success"` with
+    // checkout charges but carry a different shape. Branch on the DATA before
+    // anything can look up a PaymentIntent: a VA `merchant_transaction_ref` is
+    // Providus's settlement id, never ours, and must never touch that table.
+    if (isReservedVaWebhook(payload)) {
+      await handleReservedVaSettlement(payload);
+      return;
+    }
 
     if (!isWebhookPaymentEvent(payload)) {
       console.log(`[gpay.webhook] ignoring event: ${payload?.event}`);
@@ -635,6 +895,298 @@ export const gpayWebhook = async (req: Request, res: Response) => {
     console.error("[gpay.webhook] processing error:", err);
   }
 };
+
+// ── Reserved virtual account settlement ───────────────────────────────────
+//
+// Runs ONLY for the VA dialect (isReservedVaWebhook) and always AFTER the
+// 200-ack, BEFORE any PaymentIntent lookup — a VA `merchant_transaction_ref`
+// is Providus's settlement id, never ours, and must not touch that table.
+//
+// It may attach a match or write a stub. It never flips Payment/Invoice
+// status and never stamps confirmedAt/confirmedById: confirmation stays on
+// the treasurer path.
+
+/** Candidate lookback — credits older than this are never auto-attached. */
+const VA_LOOKBACK_MS = 72 * 60 * 60 * 1000;
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+/**
+ * Tell whoever can reconcile it. Wrapped so a notification failure can never
+ * fail webhook handling — the settlement itself is already persisted by then.
+ */
+async function notifyTreasuryReconciliation(vars: Record<string, string>) {
+  try {
+    const recipients = await prisma.user.findMany({
+      where: { role: { in: ["treasurer"] } },
+      select: { id: true, email: true, phone: true },
+    });
+
+    // NOTIFICATION_TEST_MODE routes the SMS/email to the configured test
+    // recipient so integration runs never text a real colleague. The in-app
+    // notification row still lands on the treasurer.
+    const testMode = process.env.NOTIFICATION_TEST_MODE !== "false";
+    const routedTo = {
+      email: testMode
+        ? process.env.TEST_RECIPIENT_EMAIL || undefined
+        : undefined,
+      phone: testMode
+        ? process.env.TEST_RECIPIENT_PHONE || undefined
+        : undefined,
+    };
+
+    for (const recipient of recipients) {
+      await notify({
+        userId: recipient.id,
+        to: testMode
+          ? routedTo
+          : {
+              email: recipient.email ?? undefined,
+              phone: recipient.phone ?? undefined,
+            },
+        templateKey: "payment.unmatchedBankTransfer",
+        vars,
+        channels: ["email"],
+      });
+    }
+  } catch (err) {
+    console.error("[gpay.va] reconciliation notification failed:", err);
+  }
+}
+
+/**
+ * Records a credit we could not (or did not) attach to a pending Payment.
+ * `serviceCode` holds OUR code when known; an unmapped credit leaves it null
+ * and keeps GPay's code inside rawPayload rather than polluting the column.
+ */
+async function persistVaSettlementStub(opts: {
+  payload: unknown;
+  matchStatus: "unmatched" | "ambiguous";
+  amount: number;
+  ours: string | null;
+  gatewayRef: string;
+  settledAt: Date | null;
+  payerName: string;
+  payerAccount: string;
+  payerBank: string;
+}): Promise<string> {
+  const reference = generateReference();
+
+  await prisma.payment.create({
+    data: {
+      reference,
+      amount: opts.amount,
+      method: "virtual_account",
+      status: "pending",
+      serviceCode: opts.ours,
+      gatewayRef: opts.gatewayRef || null,
+      payerName: opts.payerName || null,
+      payerAccount: opts.payerAccount || null,
+      payerBank: opts.payerBank || null,
+      settledAt: opts.settledAt,
+      matchStatus: opts.matchStatus,
+      rawPayload: (opts.payload ?? null) as any,
+    },
+  });
+
+  return reference;
+}
+
+async function handleReservedVaSettlement(payload: unknown) {
+  const data = ((payload as { data?: unknown })?.data ??
+    {}) as GpayReservedVaWebhookData;
+
+  const gpayRef = str(data.gpay_reference);
+  const settleRef = str(data.providus_settlement_id);
+  const sessionRef = str(data.providus_session_id);
+  const status = str(data.status).toLowerCase();
+  const rawAmount = str(data.amount_settled);
+  const amount = Number(rawAmount);
+  const paidAt = parseLagosDateTime(data.paid_at);
+  const gpayServiceCode = str(data.service?.service_code);
+  const ours = serviceCodeForGpay(gpayServiceCode);
+  const gatewayRef = gpayRef || settleRef || sessionRef;
+
+  const payer = data.payer_details ?? {};
+  const payerName = str(payer.source_account_name);
+  const payerAccount = str(payer.source_account_number);
+  const payerBank = str(payer.source_bank_name);
+
+  const ids = [gpayRef, settleRef, sessionRef].filter(Boolean);
+  const logTag = gatewayRef || "unknown-settlement";
+  const serviceLabel = ours ?? gpayServiceCode ?? "unknown service";
+
+  const notifyVars = (
+    matchStatus: string,
+    reference: string,
+  ): Record<string, string> => ({
+    amount: `NGN ${amount.toFixed(2)}`,
+    reference,
+    match_status: matchStatus,
+    service_name: serviceLabel,
+    payer_name: payerName || "Unknown payer",
+    payer_bank: payerBank || "Unknown bank",
+    payer_account: payerAccount || "Unknown account",
+    paid_at: paidAt ? paidAt.toISOString() : str(data.paid_at) || "Unknown",
+    gateway_ref: gatewayRef || "n/a",
+  });
+
+  // A Payment row needs a real amount; with nothing usable there is no row to
+  // write and nothing to match against. Log and hold.
+  if (!Number.isFinite(amount) || amount <= 0) {
+    console.error(
+      `[gpay.va] ${logTag} — amount_settled "${rawAmount}" is not a usable amount; holding without persisting`,
+    );
+    return;
+  }
+
+  // 1. DEDUPE FIRST — same settlement re-delivered. Already acked; stop here so
+  //    a retry can never create a second row.
+  if (ids.length) {
+    const seen = await prisma.payment.findFirst({
+      where: { gatewayRef: { in: ids } },
+      select: { id: true, reference: true },
+    });
+    if (seen) {
+      console.log(
+        `[gpay.va] ${logTag} already recorded as ${seen.reference} — duplicate delivery ignored`,
+      );
+      return;
+    }
+  }
+
+  // 2. Anything that isn't an accepted credit: persist + hold, change nothing.
+  if (status !== "successful") {
+    const reference = await persistVaSettlementStub({
+      payload,
+      matchStatus: "unmatched",
+      amount,
+      ours,
+      gatewayRef,
+      settledAt: paidAt,
+      payerName,
+      payerAccount,
+      payerBank,
+    });
+    console.warn(
+      `[gpay.va] ${logTag} reported status "${status}" — stored as ${reference}, nothing confirmed`,
+    );
+    await notifyTreasuryReconciliation(
+      notifyVars(`unmatched (gateway status "${status}")`, reference),
+    );
+    return;
+  }
+
+  // 3. Unmapped service_code — we cannot know which pending payment this was.
+  if (!ours) {
+    const reference = await persistVaSettlementStub({
+      payload,
+      matchStatus: "unmatched",
+      ours: null,
+      amount,
+      gatewayRef,
+      settledAt: paidAt,
+      payerName,
+      payerAccount,
+      payerBank,
+    });
+    console.warn(
+      `[gpay.va] ${logTag} for unmapped service_code "${gpayServiceCode}" — stored as ${reference}`,
+    );
+    await notifyTreasuryReconciliation(
+      notifyVars(
+        `unmatched (unmapped service_code "${gpayServiceCode}")`,
+        reference,
+      ),
+    );
+    return;
+  }
+
+  // 4. Candidates: pending transfers for THIS service in the window ending at
+  //    paid_at and reaching back 72h, then filtered on exact amount.
+  //
+  //    `paid_at` carries NO sub-second component ("14:30:00"), so the parsed
+  //    timestamp is the start of that second. Comparing `createdAt <= paid_at`
+  //    literally would reject a payment created even 1ms later in the same
+  //    second — a citizen who transfers immediately after being handed their
+  //    reference would be falsely reported as unmatched. Treat the whole
+  //    reported second as valid.
+  const settledAt = paidAt ?? new Date();
+  const windowEnd = new Date(settledAt.getTime() + 999);
+  const windowStart = new Date(settledAt.getTime() - VA_LOOKBACK_MS);
+
+  const rows = await prisma.payment.findMany({
+    where: {
+      status: "pending",
+      method: { in: ["bank_transfer", "virtual_account"] },
+      createdAt: { gte: windowStart, lte: windowEnd },
+      OR: [
+        { serviceCode: ours },
+        { invoice: { is: { service: { code: ours } } } },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, reference: true, amount: true, createdAt: true },
+  });
+
+  const candidates = rows.filter((row) => sameAmount(row.amount, amount));
+
+  // 5a. Exactly one → attach the evidence. Status stays `pending` throughout;
+  //     confirming the payment is the treasurer's call, never ours.
+  if (candidates.length === 1) {
+    const target = candidates[0];
+    await prisma.payment.update({
+      where: { id: target.id },
+      data: {
+        gatewayRef: gatewayRef || null,
+        payerName: payerName || null,
+        payerAccount: payerAccount || null,
+        payerBank: payerBank || null,
+        settledAt: paidAt,
+        matchStatus: "matched",
+        serviceCode: ours,
+        rawPayload: (payload ?? null) as any,
+      },
+    });
+    console.log(
+      `[gpay.va] ${logTag} matched ${target.reference} (NGN ${amount}) — awaiting treasurer confirmation`,
+    );
+    await notifyTreasuryReconciliation(notifyVars("matched", target.reference));
+    return;
+  }
+
+  // 5b. Zero or 2+ → record it and hand it to a human. NOTHING else changes.
+  const matchStatus = candidates.length === 0 ? "unmatched" : "ambiguous";
+  const reference = await persistVaSettlementStub({
+    payload,
+    matchStatus,
+    amount,
+    ours,
+    gatewayRef,
+    settledAt: paidAt,
+    payerName,
+    payerAccount,
+    payerBank,
+  });
+
+  if (candidates.length === 0) {
+    console.warn(
+      `[gpay.va] ${logTag} — no pending ${ours} payment matched NGN ${amount}; stored as ${reference}`,
+    );
+    await notifyTreasuryReconciliation(
+      notifyVars("unmatched (no candidate)", reference),
+    );
+  } else {
+    console.warn(
+      `[gpay.va] ${logTag} — ${candidates.length} candidates matched NGN ${amount}; ambiguous, stored as ${reference}`,
+    );
+    await notifyTreasuryReconciliation(
+      notifyVars(`ambiguous (${candidates.length} candidates)`, reference),
+    );
+  }
+}
 
 
 

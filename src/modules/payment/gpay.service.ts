@@ -499,6 +499,219 @@ export function isWebhookPaid(payload: GpayWebhookPayload): boolean {
   return normalizeGatewayStatus(payload?.data?.status) !== "failed";
 }
 
+// ── 4. Reserved virtual accounts (bank-transfer settlement) ──────────────
+//
+// GPay owns a pool of Providus Bank accounts, one per service. We resolve our
+// `Service.code` to GPay's `service_code`, ask GPay which accounts exist, and
+// hand the citizen exactly one account plus a fresh reference to quote in
+// their transfer narration. The VA webhook carries NO narration, so that
+// reference is for the bank statement; amount + account + createdAt are what
+// actually match an inbound credit.
+
+/**
+ * GPay's `service_code` for each of our `Service.code` values.
+ *
+ * EXACT KEYS ONLY — never match on `service_name` and never pattern-match the
+ * shape of a code (`TENEMENTR`, `MARKET_FEES` and friends are inconsistent).
+ * Seeded from the live reserved-accounts response; a service missing here
+ * simply has no account, which is the correct outcome.
+ */
+export const SERVICE_CODE_BY_SERVICE: Record<string, string> = {
+  business_registration: "BIZREGIS",
+  cda_registration: "CDAREGIST",
+  club_registration: "CLUBREGIS",
+  farmers_registration: "FARMREGIS",
+  haulage_fees: "HAULAGEFE",
+  kiosk_licence: "KIOSKLICN",
+  liquor_licence: "LIQUORFEE",
+  quarry_permit: "QUARRYPRM",
+  sanitation_compliance: "ENVSANITN",
+  state_of_origin: "ORIGINCER",
+  street_naming: "STRTNAMNG",
+  tenement_rate: "TENEMENTR",
+  viewing_centre_licence: "VIEWCNTRL",
+};
+
+/** Our `Service.code` for an inbound GPay `service_code`, or null when unmapped. */
+export function serviceCodeForGpay(serviceCode: unknown): string | null {
+  if (typeof serviceCode !== "string") return null;
+  const needle = serviceCode.trim();
+  if (!needle) return null;
+  for (const [ours, theirs] of Object.entries(SERVICE_CODE_BY_SERVICE)) {
+    if (theirs === needle) return ours;
+  }
+  return null;
+}
+
+export interface ReservedVirtualAccount {
+  accountNumber: string;
+  accountName: string;
+  bankName: string;
+  serviceCode: string;
+  status: string;
+}
+
+interface ReservedAccountsCache {
+  fetchedAt: number;
+  accounts: ReservedVirtualAccount[];
+}
+
+const RESERVED_ACCOUNTS_TTL_MS = 10 * 60 * 1000;
+let reservedAccountsCache: ReservedAccountsCache | null = null;
+
+/**
+ * GPay's reserved virtual accounts — SERVER SIDE ONLY. The bearer token never
+ * reaches a browser, and `total_settled` / `bank_code` / `created_at` are
+ * dropped here so they can never be serialized to a client.
+ *
+ * Cached ~10 minutes; a failed refresh serves the stale list rather than
+ * breaking the citizen's payment page. If we have never loaded the list the
+ * error propagates and the caller returns 404 VIRTUAL_ACCOUNT_UNAVAILABLE.
+ *
+ * Path note: it is `/virtual-accounts/reserved` — the `/mastercard/` prefixed
+ * variant in the integration notes returns 404 against the live gateway.
+ */
+export async function getReservedVirtualAccounts(
+  opts: { forceRefresh?: boolean } = {},
+): Promise<ReservedVirtualAccount[]> {
+  const cache = reservedAccountsCache;
+  const isFresh =
+    !opts.forceRefresh &&
+    cache !== null &&
+    Date.now() - cache.fetchedAt < RESERVED_ACCOUNTS_TTL_MS;
+
+  if (isFresh) return cache!.accounts;
+
+  const res = await fetch(`${GPAY_BASE_URL}/virtual-accounts/reserved`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${GPAY_AUTH_SECRET}`,
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(GPAY_TIMEOUT_MS),
+  });
+
+  if (!res.ok) throw new Error(`GPay reserved accounts HTTP ${res.status}`);
+
+  const body = (await res.json()) as {
+    response_code?: string;
+    data?: unknown;
+  };
+
+  if (body?.response_code !== "00") {
+    throw new Error(
+      `GPay reserved accounts rejected — response_code=${
+        body?.response_code ?? "missing"
+      }`,
+    );
+  }
+
+  const accounts: ReservedVirtualAccount[] = [];
+  for (const entry of Array.isArray(body.data) ? body.data : []) {
+    const row = entry as Record<string, unknown>;
+    const accountNumber = String(row?.account_number ?? "").trim();
+    const serviceCode = String(row?.service_code ?? "").trim();
+    if (!accountNumber || !serviceCode) continue;
+    accounts.push({
+      accountNumber,
+      accountName: String(row?.account_name ?? "").trim(),
+      bankName: String(row?.bank_name ?? "").trim(),
+      serviceCode,
+      status: String(row?.status ?? "").trim().toLowerCase(),
+    });
+  }
+
+  reservedAccountsCache = { fetchedAt: Date.now(), accounts };
+  return accounts;
+}
+
+/**
+ * The ONE active reserved account for a GPay `service_code`, or null.
+ * Two active accounts on one code is a data problem we refuse to guess at.
+ */
+export async function findReservedAccount(
+  gpayServiceCode: string,
+): Promise<ReservedVirtualAccount | null> {
+  const accounts = await getReservedVirtualAccounts();
+  const matches = accounts.filter(
+    (a) => a.serviceCode === gpayServiceCode && a.status === "active",
+  );
+
+  if (matches.length === 0) return null;
+
+  if (matches.length > 1) {
+    console.error(
+      `[gpay.service] service_code ${gpayServiceCode} resolved to ${matches.length} active accounts — refusing to pick one`,
+    );
+    return null;
+  }
+
+  return matches[0];
+}
+
+/**
+ * GPay timestamps ("2026-09-28 14:30:00") carry no zone, and Node would read
+ * that as SERVER local time. The gateway writes West Africa Time, so pull the
+ * parts out ourselves and subtract Africa/Lagos (UTC+1, no DST) for UTC.
+ */
+export function parseLagosDateTime(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  const parts = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!parts) return null;
+
+  const [, y, mo, d, h, mi, s] = parts;
+  const utc = Date.UTC(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h),
+    Number(mi),
+    Number(s ?? 0),
+  );
+  return new Date(utc - 60 * 60 * 1000);
+}
+
+// ── 5. Reserved virtual account webhook dialect ──────────────────────────
+//
+// GPay posts TWO different shapes under the SAME `event: "charge.success"`.
+// Always branch on the data, never on the event name.
+
+export interface GpayReservedVaWebhookData {
+  gpay_reference?: string;
+  /** Providus's SETTLEMENT id — NOT one of our references. Never look it up. */
+  providus_settlement_id?: string;
+  providus_session_id?: string;
+  /** Our reference never appears here either; there is no narration field. */
+  merchant_transaction_ref?: string;
+  status?: string;
+  account_type?: string;
+  amount_settled?: string;
+  fee?: string;
+  currency?: string;
+  account_number?: string;
+  paid_at?: string;
+  service?: { service_code?: string; service_name?: string };
+  payer_details?: {
+    source_account_number?: string;
+    source_account_name?: string;
+    source_bank_name?: string;
+    channel_id?: string;
+  };
+  [key: string]: unknown;
+}
+
+/** True when this payload is the reserved-VA dialect, not a checkout charge. */
+export function isReservedVaWebhook(payload: unknown): boolean {
+  const data = (payload as { data?: unknown } | null | undefined)?.data;
+  if (!data || typeof data !== "object") return false;
+  return (
+    String((data as Record<string, unknown>).account_type ?? "").trim() ===
+    "Reserved Virtual Account"
+  );
+}
+
 
 
 

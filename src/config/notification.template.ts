@@ -735,6 +735,42 @@ export const accountTemplates = {
 };
 
 // ============================================================
+// PAYMENTS — reserved virtual account / manual bank transfer
+// ============================================================
+export const paymentTemplates = {
+  // A reserved-virtual-account credit arrived but could not be tied to a
+  // pending Payment (or tied to more than one). NOTHING is confirmed
+  // automatically — a treasurer reconciles it against the bank statement
+  // using the reference the citizen was asked to quote.
+  unmatchedBankTransfer: {
+    sms: `LOGMAS: unconfirmed transfer of {{amount}} from {{payer_name}} ({{payer_bank}} {{payer_account}}) for {{service_name}}. Our ref {{reference}}. Please reconcile in the treasury dashboard.`,
+    emailSubject: `Unconfirmed transfer: {{amount}} — {{service_name}}`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 32px; border-top: 4px solid #f59e0b;">
+    <h2 style="color: #92400e;">Transfer needs reconciliation</h2>
+    <p>A credit arrived on the Odeda reserved virtual account but could not be matched to a pending payment. <strong>No payment status was changed.</strong></p>
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px;">
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Amount settled:</span> <strong>{{amount}}</strong></div>
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Our reference:</span> {{reference}}</div>
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Match outcome:</span> {{match_status}}</div>
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Service:</span> {{service_name}}</div>
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Payer:</span> {{payer_name}}</div>
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Source account:</span> {{payer_bank}} — {{payer_account}}</div>
+      <div style="margin-bottom: 6px;"><span style="color:#6b7280;">Paid at:</span> {{paid_at}}</div>
+      <div><span style="color:#6b7280;">Gateway reference:</span> {{gateway_ref}}</div>
+    </div>
+    <p style="font-size: 13px; color: #6b7280;">Confirm the transfer in your bank statement, then record it from the treasury dashboard.</p>
+    <a href="${BASE_URL}/dashboard/treasurer/reconciliation" style="display: inline-block; background: #92400e; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">Open reconciliation →</a>
+  </div>
+</body>
+</html>`,
+  },
+};
+
+// ============================================================
 // EXPORT ALL
 // ============================================================
 
@@ -742,6 +778,7 @@ export const NotificationTemplates = {
   application: applicationTemplates,
   complaint: complaintTemplates,
   account: accountTemplates,
+  payment: paymentTemplates,
 };
 
 export type TemplateVars = Record<string, string>;

@@ -442,14 +442,33 @@ model Payment {
   confirmedById String?
 
   confirmedAt DateTime?
-  invoiceId   String
-  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  // Nullable: a reserved-virtual-account credit can be recorded before any
+  // invoice exists — the public "pay first" flow has no invoice yet, and an
+  // unmatched settlement stub has none either.
+  invoiceId   String?
+  invoice     Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   paidById    String?
   paidBy      User?     @relation(fields: [paidById], references: [id])
+
+  // ── Reserved virtual account settlement (GPay / Providus) ──────────────
+  // The VA webhook carries NO narration field, so a citizen's transfer is
+  // matched to a pending Payment by service + amount + creation time.
+  // These columns hold the evidence and the match outcome. NOTHING here ever
+  // confirms a payment — confirmation stays on the treasurer path.
+  rawPayload  Json?
+  serviceCode String?
+  payerName    String?
+  payerAccount String?
+  payerBank    String?
+  settledAt    DateTime?
+  // unmatched | candidate | matched | ambiguous
+  matchStatus String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([matchStatus])
+  @@index([serviceCode, status])
   @@map("payments")
 }
 

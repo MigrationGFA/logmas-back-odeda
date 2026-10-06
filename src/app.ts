@@ -23,6 +23,7 @@ import receiptRoutes from './modules/receipts/receipt.routes';
 import certificateRoutes from './modules/certificate/certificate.routes';
 import dashboardRoutes from './modules/dashboard/dashboard.controller';
 import serviceRoutes from "./modules/services/service.routes";
+import newsRoutes from './modules/news/news.routes';
 
 import { errorHandler } from './middleware/error.middleware';
 import { swaggerDocument } from './config/swagger';
@@ -98,6 +99,7 @@ app.use('/api/v1/uploads', uploadRoutes);
 app.use('/api/v1/receipts', receiptRoutes);
 app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/v1/chairman',    chairmanRoutes);
+app.use('/api/v1', newsRoutes); // News & Updates: /news* (public) + /lga/news* (chairman, lga_admin)
 
 
 // Shared Interactive Engine Schema Verification Explorer Links UI Routes

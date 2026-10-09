@@ -802,3 +802,221 @@ export const adminDeclineApplication = async (
     next(err);
   }
 };
+
+/**
+ * GET /applications/reference/:reference  — PUBLIC (no requireAuth by design)
+ *
+ * Backs the citizen "Track My Application" page in the frontend. Accepts:
+ *   - application number, e.g. "ODE-APP-2026-000101" (case-insensitive)
+ *   - application UUID
+ *   - invoice number / transaction reference / virtual account reference
+ *
+ * Returns a deliberately REDACTED projection: only the applicant's name
+ * fields are exposed from formData (no email, phone or address), and no
+ * payment gateway references — anyone holding an application number can
+ * call this route.
+ */
+export const getApplicationByReference = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const rawRef = req.params.reference;
+    const ref = String(Array.isArray(rawRef) ? rawRef[0] : rawRef || "").trim();
+    if (!ref) {
+      return sendError(
+        res,
+        "An application reference is required",
+        "VALIDATION_ERROR",
+        null,
+        400,
+      );
+    }
+
+    const include = {
+      service: { select: { id: true, name: true } },
+      applicant: { select: { firstName: true, lastName: true } },
+      certificate: { select: { certificateNumber: true, issuedAt: true } },
+      invoice: {
+        include: {
+          receipts: { select: { receiptNumber: true, issuedAt: true } },
+        },
+      },
+    };
+
+    const UUID_RE =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // 1) Exact application number  2) Case-insensitive number  3) UUID id
+    let app =
+      (await prisma.application.findUnique({
+        where: { applicationNumber: ref },
+        include,
+      })) ??
+      (await prisma.application.findFirst({
+        where: { applicationNumber: { equals: ref, mode: "insensitive" } },
+        include,
+      })) ??
+      (UUID_RE.test(ref)
+        ? await prisma.application.findUnique({ where: { id: ref }, include })
+        : null);
+
+    // 4) Payment references → application
+    if (!app) {
+      const invoice = await prisma.invoice.findFirst({
+        where: {
+          OR: [
+            { invoiceNumber: { equals: ref, mode: "insensitive" } },
+            { transactionRef: ref },
+            { virtualAccountRef: ref },
+          ],
+        },
+      });
+      if (invoice?.applicationId) {
+        app = await prisma.application.findUnique({
+          where: { id: invoice.applicationId },
+          include,
+        });
+      }
+    }
+
+    if (!app) {
+      return sendError(
+        res,
+        `No application found for "${ref}"`,
+        "NOT_FOUND",
+        null,
+        404,
+      );
+    }
+
+    // ---- Redacted public projection -------------------------------------
+    const formData: any = app.formData ?? {};
+    const composedName = [formData.firstName, formData.lastName]
+      .filter(Boolean)
+      .join(" ");
+    const applicantName =
+      composedName ||
+      formData.fullName ||
+      (app.applicant
+        ? `${app.applicant.firstName} ${app.applicant.lastName}`
+        : null);
+
+    const invoice: any = app.invoice ?? null;
+    const receipt = invoice?.receipts?.[0] ?? null;
+    const paymentStatus: string | null = invoice?.paymentStatus ?? null;
+
+    // History events — only facts provable from the record (the frontend
+    // renders timeline entries shaped { id, title, timestamp, description? }).
+    const iso = (d: any) => new Date(d).toISOString();
+    const timeline: Array<{
+      id: string;
+      title: string;
+      timestamp: string;
+      description?: string;
+    }> = [
+      {
+        id: "submitted",
+        title: "Application submitted",
+        timestamp: iso(app.createdAt),
+      },
+    ];
+    if (invoice) {
+      timeline.push({
+        id: "invoice",
+        title: "Invoice issued",
+        timestamp: iso(invoice.createdAt ?? app.createdAt),
+        description: invoice.invoiceNumber,
+      });
+    }
+    if (invoice?.paidAt && paymentStatus === "confirmed") {
+      timeline.push({
+        id: "payment",
+        title: "Payment confirmed",
+        timestamp: iso(invoice.paidAt),
+      });
+    }
+    if (receipt) {
+      timeline.push({
+        id: "receipt",
+        title: "Receipt issued",
+        timestamp: iso(receipt.issuedAt),
+        description: receipt.receiptNumber,
+      });
+    }
+    if (app.status === "under_review") {
+      timeline.push({
+        id: "review",
+        title: "Under review by LGA",
+        timestamp: iso(app.updatedAt),
+      });
+    }
+    if (app.reviewedAt) {
+      timeline.push({
+        id: "decision",
+        title:
+          app.status === "declined"
+            ? "Application declined"
+            : app.status === "approved"
+              ? "Application approved"
+              : "Review completed",
+        timestamp: iso(app.reviewedAt),
+        description: app.declineReason ?? undefined,
+      });
+    }
+    if (app.certificate) {
+      timeline.push({
+        id: "certificate",
+        title: "Certificate issued",
+        timestamp: iso(app.certificate.issuedAt),
+        description: app.certificate.certificateNumber,
+      });
+    }
+    timeline.sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+
+    return sendSuccess(
+      res,
+      {
+        id: app.id,
+        applicationNumber: app.applicationNumber,
+        status: app.status,
+        serviceId: app.serviceId,
+        service: app.service,
+        serviceName: app.service?.name ?? null,
+        applicant: applicantName ? { name: applicantName } : null,
+        // Name fields only — contact details and address are never exposed.
+        formData: {
+          fullName: formData.fullName ?? null,
+          firstName: formData.firstName ?? null,
+          lastName: formData.lastName ?? null,
+        },
+        feeAmount: app.feeAmount,
+        // The frontend checks top-level "paid"; map confirmed → paid.
+        paymentStatus: paymentStatus === "confirmed" ? "paid" : paymentStatus,
+        invoiceNumber: invoice?.invoiceNumber ?? null,
+        receiptNumber: receipt?.receiptNumber ?? null,
+        certificateNumber: app.certificate?.certificateNumber ?? null,
+        invoice: invoice
+          ? {
+              invoiceNumber: invoice.invoiceNumber,
+              paymentStatus: invoice.paymentStatus,
+              amount: invoice.amount,
+              paidAt: invoice.paidAt ?? null,
+            }
+          : null,
+        declineReason: app.declineReason ?? null,
+        createdAt: app.createdAt,
+        updatedAt: app.updatedAt,
+        reviewedAt: app.reviewedAt ?? null,
+        timeline,
+      },
+      "Application found",
+    );
+  } catch (err) {
+    next(err);
+  }
+};

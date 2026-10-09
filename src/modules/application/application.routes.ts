@@ -12,6 +12,7 @@ import { sendError } from "../../utils/response";
 import {
   createApplication,
   getApplicationById,
+  getApplicationByReference,
   listApplications,
   adminListApplications,
   adminGetApplication,
@@ -281,6 +282,12 @@ router.patch(
   requireRole("lga_admin", "super_admin"),
   adminDeclineApplication,
 );
+
+// Public "Track My Application" lookup — intentionally NOT behind requireAuth:
+// citizens track by application number without an account. The handler returns
+// a redacted projection (name-only applicant, no contact details / gateway refs).
+// Registered before "/:id" so "reference" can never be swallowed as an id.
+router.get("/reference/:reference", getApplicationByReference);
 
 router.get("/:id", requireAuth, getApplicationById);
 router.get("/", requireAuth, listApplications);

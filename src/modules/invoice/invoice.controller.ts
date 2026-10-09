@@ -101,6 +101,8 @@ export const fetchInvoicesHubData = async ({
           id: true,
           applicationNumber: true,
           applicantId: true,
+          createdAt: true,
+          formData: true,
           service: {
             select: {
               id: true,
@@ -117,6 +119,7 @@ export const fetchInvoicesHubData = async ({
           id: true,
           amount: true,
           status: true,
+          confirmedAt: true,
         },
       },
 
@@ -171,34 +174,58 @@ export const fetchInvoicesHubData = async ({
       avgPayment,
     },
 
-    invoices: invoices.map((invoice) => ({
-      id: invoice.id,
-      reference: invoice.invoiceNumber,
-      amount: Number(invoice.amount),
-      paymentStatus: invoice.paymentStatus,
-      // dueDate: invoice.dueDate
-      //   ? invoice.dueDate.toISOString().split("T")[0]
-      //   : null,
+    invoices: invoices.map((invoice) => {
+      const formData =
+        invoice.application?.formData &&
+        typeof invoice.application.formData === "object"
+          ? (invoice.application.formData as Record<string, any>)
+          : {};
 
-      application: invoice.application
-        ? {
-            id: invoice.application.id,
-            applicationNumber: invoice.application.applicationNumber,
-            applicantId: invoice.application.applicantId,
-          }
-        : null,
+      const customerName =
+        formData.fullName ||
+        formData.applicantName ||
+        formData.ownerName ||
+        formData.businessName ||
+        formData.companyName ||
+        null;
 
-      service: invoice.application?.service
-        ? {
-            id: invoice.application.service.id,
-            code: invoice.application.service.code,
-            name: invoice.application.service.name,
-            category: invoice.application.service.category,
-          }
-        : null,
+      const confirmedPayments = invoice.payments
+        .filter((payment) => payment.status === "confirmed")
+        .sort(
+          (a, b) =>
+            (b.confirmedAt?.getTime() ?? 0) - (a.confirmedAt?.getTime() ?? 0),
+        );
 
-      receipts: invoice.receipts,
-    })),
+      return {
+        id: invoice.id,
+        reference: invoice.invoiceNumber,
+        amount: Number(invoice.amount),
+        paymentStatus: invoice.paymentStatus,
+        customerName,
+        paidAt: invoice.paidAt ?? confirmedPayments[0]?.confirmedAt ?? null,
+        createdAt: invoice.createdAt,
+        dateOfApplication: invoice.application?.createdAt ?? null,
+
+        application: invoice.application
+          ? {
+              id: invoice.application.id,
+              applicationNumber: invoice.application.applicationNumber,
+              applicantId: invoice.application.applicantId,
+            }
+          : null,
+
+        service: invoice.application?.service
+          ? {
+              id: invoice.application.service.id,
+              code: invoice.application.service.code,
+              name: invoice.application.service.name,
+              category: invoice.application.service.category,
+            }
+          : null,
+
+        receipts: invoice.receipts,
+      };
+    }),
   };
 };
 

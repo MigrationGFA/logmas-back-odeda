@@ -121,6 +121,14 @@ export const getReportsOverview = async (
             select: {
               applicationNumber: true,
               formData: true,
+              createdAt: true,
+
+              applicant: {
+                select: {
+                  email: true,
+                  phone: true,
+                },
+              },
 
               service: {
                 select: {
@@ -130,6 +138,19 @@ export const getReportsOverview = async (
                   revenueHead: true,
                 },
               },
+            },
+          },
+
+          payments: {
+            where: {
+              status: "confirmed",
+            },
+            orderBy: {
+              confirmedAt: "desc",
+            },
+            take: 1,
+            select: {
+              confirmedAt: true,
             },
           },
         },
@@ -162,6 +183,14 @@ export const getReportsOverview = async (
                 select: {
                   applicationNumber: true,
                   formData: true,
+                  createdAt: true,
+
+                  applicant: {
+                    select: {
+                      email: true,
+                      phone: true,
+                    },
+                  },
 
                   service: {
                     select: {
@@ -184,6 +213,7 @@ export const getReportsOverview = async (
                 take: 1,
                 select: {
                   method: true,
+                  confirmedAt: true,
                 },
               },
             },
@@ -268,6 +298,19 @@ export const getReportsOverview = async (
         formData.companyName ||
         "Unknown";
 
+      const phone =
+        formData.phone ||
+        formData.phoneNumber ||
+        formData.phoneNo ||
+        invoice.application?.applicant?.phone ||
+        null;
+
+      const email =
+        formData.email ||
+        formData.emailAddress ||
+        invoice.application?.applicant?.email ||
+        null;
+
       return {
         id: invoice.id,
         reference: invoice.invoiceNumber,
@@ -286,6 +329,11 @@ export const getReportsOverview = async (
         paymentStatus: invoice.paymentStatus,
         paidAt: invoice.paidAt,
         createdAt: invoice.createdAt,
+        phone,
+        email,
+        date_of_application: invoice.application?.createdAt ?? null,
+        date_of_payment:
+          invoice.paidAt ?? invoice.payments[0]?.confirmedAt ?? null,
       };
     });
 
@@ -307,6 +355,19 @@ export const getReportsOverview = async (
         formData.businessName ||
         formData.companyName ||
         "Unknown";
+
+      const phone =
+        formData.phone ||
+        formData.phoneNumber ||
+        formData.phoneNo ||
+        receipt.invoice.application?.applicant?.phone ||
+        null;
+
+      const email =
+        formData.email ||
+        formData.emailAddress ||
+        receipt.invoice.application?.applicant?.email ||
+        null;
 
       const issuedBy = receipt.issuedBy;
 
@@ -332,6 +393,11 @@ export const getReportsOverview = async (
           : null,
         amount: Number(receipt.amountPaid),
         issuedAt: receipt.issuedAt,
+        phone,
+        email,
+        date_of_application: receipt.invoice.application?.createdAt ?? null,
+        date_of_payment:
+          receipt.invoice.payments[0]?.confirmedAt ?? receipt.issuedAt,
       };
     });
 

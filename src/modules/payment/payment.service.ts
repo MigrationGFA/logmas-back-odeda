@@ -209,6 +209,10 @@ export async function confirmPayment({
       },
       data: {
         paymentStatus: isFullPayment ? "confirmed" : "failed",
+        // Stamp the payment date exactly once, when the invoice is fully
+        // settled. Without this the ledger shows confirmed invoices with a
+        // null paidAt (the field was only ever set at invoice creation).
+        paidAt: isFullPayment ? (invoice.paidAt ?? new Date()) : invoice.paidAt,
       },
     });
 

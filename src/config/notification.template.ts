@@ -528,16 +528,16 @@ export const accountTemplates = {
 
   // Welcome — new staff account created
   welcomeStaff: {
-    sms: `Welcome to ${lgaName} LGA Portal, {{applicant_name}}. Your account has been created. Temporary password: {{temp_password}}. Login at: ${BASE_URL}/login — Change your password immediately.`,
+    sms: `Welcome to ${lgaName}, {{applicant_name}}. Your account has been created. Temporary password: {{temp_password}}. Login at: ${BASE_URL}/login — Change your password immediately.`,
 
-    emailSubject: `Welcome to ${lgaName} LGA Portal — Account Created`,
+    emailSubject: `Welcome to ${lgaName} — Account Created`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
     <div style="background: #1a4731; padding: 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName} LGA Portal</h1>
+      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName}</h1>
       <p style="color: #a7f3d0; margin: 4px 0 0;">${lgaName} Local Government Area</p>
     </div>
     <div style="padding: 32px;">
@@ -564,7 +564,7 @@ export const accountTemplates = {
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
     
     <div style="background: #1a4731; padding: 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName} LGA Portal</h1>
+      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName}</h1>
       <p style="color: #a7f3d0; margin: 4px 0 0;">
         Local Government Management System
       </p>
@@ -673,16 +673,16 @@ export const accountTemplates = {
 
   // Welcome — account created through the public application route
   publicAccountCreated: {
-    sms: `Welcome to ${lgaName} LGA Portal, {{applicant_name}}. Your account has been created after your payment for {{service_name}}. Login at: ${BASE_URL}/login to complete your application. Your temporary password is {{temp_password}}. Please change it after logging in.`,
+    sms: `Welcome to ${lgaName}, {{applicant_name}}. Your account has been created after your payment for {{service_name}}. Login at: ${BASE_URL}/login to complete your application. Your temporary password is {{temp_password}}. Please change it after logging in.`,
 
-    emailSubject: `Welcome to ${lgaName} LGA Portal — Complete Your {{service_name}} Application`,
+    emailSubject: `Welcome to ${lgaName} — Complete Your {{service_name}} Application`,
     emailHtml: `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #1a1a1a; padding: 32px; background: #f5f5f5;">
   <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden;">
     <div style="background: #1a4731; padding: 32px; text-align: center;">
-      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName} LGA Portal</h1>
+      <h1 style="color: #fff; margin: 0;">Welcome to ${lgaName}</h1>
       <p style="color: #a7f3d0; margin: 4px 0 0;">Local Government Management & Service Portal</p>
     </div>
 
@@ -691,7 +691,7 @@ export const accountTemplates = {
 
       <p>
         Your payment for <strong>{{service_name}}</strong> has been successfully received,
-        and your ${lgaName} LGA Portal account has been created.
+        and your ${lgaName} account has been created.
       </p>
 
       <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0;">
